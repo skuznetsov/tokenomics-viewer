@@ -8,6 +8,7 @@ const { execFileSync } = require("node:child_process");
 const test = require("node:test");
 
 const {
+  buildReportFromDatabase,
   buildReport,
   calculateCost,
   createLineProcessor,
@@ -15,6 +16,8 @@ const {
   main,
   newReport,
   parseArgs,
+  startWebServer,
+  syncDatabase,
 } = require("../app");
 
 function defaultOptions(extra = {}) {
@@ -27,6 +30,10 @@ function defaultOptions(extra = {}) {
     top: 25,
     openaiContext: "short",
     output: null,
+    db: null,
+    webserver: false,
+    host: "127.0.0.1",
+    port: 0,
     progress: false,
     strictJson: false,
     paths: [],
@@ -562,6 +569,101 @@ test("main writes final JSON report with per-session metrics", async () => {
     output: 2,
   });
   assert.ok(written.sessions[0].durationMs >= 0);
+});
+
+test("syncDatabase imports sources idempotently and replaces changed sessions", async () => {
+  const tmp = fs.mkdtempSync(Path.join(os.tmpdir(), "tokenomics-db-test-"));
+  const jsonl = Path.join(tmp, "session.jsonl");
+  const db = Path.join(tmp, "tokenomics.sqlite");
+
+  const writeSession = (outputTokens) => fs.writeFileSync(jsonl, [
+    JSON.stringify({
+      type: "turn_context",
+      timestamp: "2026-07-05T00:00:00.000Z",
+      payload: { cwd: "/tmp/project-db", model: "gpt-5-codex", effort: "high" },
+    }),
+    JSON.stringify({
+      type: "event_msg",
+      timestamp: "2026-07-05T00:00:01.000Z",
+      payload: {
+        type: "token_count",
+        info: {
+          last_token_usage: {
+            input_tokens: 1_000_000,
+            cached_input_tokens: 100_000,
+            output_tokens: outputTokens,
+          },
+          model_context_window: 128_000,
+        },
+      },
+    }),
+    "",
+  ].join("\n"));
+
+  writeSession(200_000);
+  const first = await syncDatabase(defaultOptions({ db, paths: [jsonl] }));
+  const second = await syncDatabase(defaultOptions({ db, paths: [jsonl] }));
+
+  assert.equal(first.total.requests, 1);
+  assert.equal(second.total.requests, 1);
+  assert.equal(second.total.output, 200_000);
+  assert.equal(second.sessions.length, 1);
+
+  writeSession(300_000);
+  const updated = await syncDatabase(defaultOptions({ db, paths: [jsonl] }));
+  assert.equal(updated.total.requests, 1);
+  assert.equal(updated.total.output, 300_000);
+  assert.equal(updated.sessions[0].stats.output, 300_000);
+
+  const fromDb = buildReportFromDatabase(db, defaultOptions());
+  assert.equal(fromDb.total.requests, 1);
+  assert.equal(fromDb.total.output, 300_000);
+});
+
+test("web server serves stored SQLite summary and sessions", async () => {
+  const tmp = fs.mkdtempSync(Path.join(os.tmpdir(), "tokenomics-web-test-"));
+  const jsonl = Path.join(tmp, "session.jsonl");
+  const db = Path.join(tmp, "tokenomics.sqlite");
+
+  fs.writeFileSync(jsonl, [
+    JSON.stringify({
+      type: "turn_context",
+      timestamp: "2026-07-05T00:00:00.000Z",
+      payload: { cwd: "/tmp/project-web", model: "gpt-5.4-mini", effort: "medium" },
+    }),
+    JSON.stringify({
+      type: "event_msg",
+      timestamp: "2026-07-05T00:00:01.000Z",
+      payload: {
+        type: "token_count",
+        info: {
+          last_token_usage: {
+            input_tokens: 1_000_000,
+            cached_input_tokens: 0,
+            output_tokens: 1_000_000,
+          },
+          model_context_window: 128_000,
+        },
+      },
+    }),
+    "",
+  ].join("\n"));
+
+  await syncDatabase(defaultOptions({ db, paths: [jsonl] }));
+  const server = await startWebServer(defaultOptions({ db, host: "127.0.0.1", port: 0 }));
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const summary = await fetch(`${base}/api/summary`).then((response) => response.json());
+    assert.equal(summary.total.requests, 1);
+    assert.equal(summary.total.output, 1_000_000);
+    assert.equal(summary.topModels[0].name, "gpt-5.4-mini");
+
+    const sessions = await fetch(`${base}/api/sessions`).then((response) => response.json());
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0].path, jsonl);
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
 });
 
 function roundCosts(costs) {

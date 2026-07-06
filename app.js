@@ -3,10 +3,13 @@
 
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
+const http = require("node:http");
 const os = require("node:os");
 const Path = require("node:path");
 const readline = require("node:readline");
+const { DatabaseSync } = require("node:sqlite");
 const { Readable } = require("node:stream");
+const { URL } = require("node:url");
 const zlib = require("node:zlib");
 
 const TOKENS_PER_PRICE_UNIT = 1_000_000;
@@ -16,6 +19,7 @@ const UNKNOWN_EFFORT = "<unknown>";
 const AGENT_CODEX = "codex";
 const AGENT_CLAUDE_CODE = "claude-code";
 const MAX_CENTRAL_DIRECTORY_BYTES = 256 * 1024 * 1024;
+const DEFAULT_DB_FILENAME = "tokenomics.sqlite";
 
 const PRICING_SOURCES = {
   openai: "https://developers.openai.com/api/docs/pricing",
@@ -204,6 +208,20 @@ function newReport() {
       enumerable: false,
       writable: true,
     },
+    _usageEvents: {
+      value: [],
+      enumerable: false,
+    },
+    _usageEventSink: {
+      value: null,
+      enumerable: false,
+      writable: true,
+    },
+    _rateLimitSampleSink: {
+      value: null,
+      enumerable: false,
+      writable: true,
+    },
   });
   return report;
 }
@@ -366,7 +384,7 @@ function addRateLimitSnapshot(report, snapshot, meta) {
     if (!window) continue;
 
     const key = rateLimitWindowKey(snapshot, kind, window);
-    report._rateLimitSamples.push({
+    const sample = {
       key,
       groupKey: `${agent}/${key}`,
       sequence: report._rateLimitSequence++,
@@ -381,6 +399,8 @@ function addRateLimitSnapshot(report, snapshot, meta) {
       usedPercent: number(window.used_percent),
       resetsAt: number(window.resets_at),
       reached: Boolean(snapshot.rate_limit_reached_type),
+      sourcePath: meta.sourcePath || null,
+      lineNo: Number.isFinite(meta.lineNo) ? meta.lineNo : null,
       agent,
       effort: normalizeEffort(meta.effort),
       model: meta.model || UNKNOWN_MODEL,
@@ -390,7 +410,12 @@ function addRateLimitSnapshot(report, snapshot, meta) {
         amount: number(meta.cost?.amount),
         reasoningAmount: number(meta.cost?.reasoningAmount),
       },
-    });
+    };
+    if (typeof report._rateLimitSampleSink === "function") {
+      report._rateLimitSampleSink(sample);
+    } else {
+      report._rateLimitSamples.push(sample);
+    }
   }
   report._rateLimitFinalized = false;
 }
@@ -656,6 +681,28 @@ function addUsage(report, record, options) {
     report.unpricedModels[key].requests += 1;
   }
 
+  const event = {
+    sourcePath: record.sourcePath || null,
+    lineNo: Number.isFinite(record.lineNo) ? record.lineNo : null,
+    timestamp: isValidDate(timestamp) ? timestamp.toISOString() : null,
+    provider,
+    model,
+    project,
+    effort,
+    usage,
+    cost: {
+      known: cost.known,
+      amount: cost.amount,
+      reasoningAmount: cost.reasoningAmount,
+      breakdown: cost.breakdown,
+    },
+  };
+  if (typeof report._usageEventSink === "function") {
+    report._usageEventSink(event);
+  } else {
+    report._usageEvents.push(event);
+  }
+
   return { timestamp, project, model, provider, effort, usage, cost };
 }
 
@@ -825,6 +872,8 @@ function createLineProcessor(report, options, sourceLabel, session = null) {
           model,
           effort,
           timestamp,
+          sourcePath: session?.path || sourceLabel,
+          lineNo,
           usage: normalizeUsage(codexUsage.usage),
           cost: { known: true, amount: 0, reasoningAmount: 0 },
         });
@@ -840,6 +889,8 @@ function createLineProcessor(report, options, sourceLabel, session = null) {
         effort,
         timestamp,
         usage: codexUsage.usage,
+        sourcePath: session?.path || sourceLabel,
+        lineNo,
       }, options);
       addRateLimitSnapshot(report, json.payload.rate_limits, {
         agent: AGENT_CODEX,
@@ -847,6 +898,8 @@ function createLineProcessor(report, options, sourceLabel, session = null) {
         model,
         effort,
         timestamp,
+        sourcePath: session?.path || sourceLabel,
+        lineNo,
         usage: added.usage,
         cost: added.cost,
       });
@@ -867,6 +920,8 @@ function createLineProcessor(report, options, sourceLabel, session = null) {
         effort: UNKNOWN_EFFORT,
         timestamp: new Date(json.timestamp),
         usage: usageFromClaudeUsage(json.message.usage),
+        sourcePath: session?.path || sourceLabel,
+        lineNo,
       }, options);
       if (session) addToStats(session.stats, added.usage, added.cost);
     }
@@ -1569,6 +1624,792 @@ async function writeReport(report, options) {
   }
 }
 
+function resolveDbPath(options) {
+  return Path.resolve(options.db || Path.join(process.cwd(), DEFAULT_DB_FILENAME));
+}
+
+function openTokenomicsDatabase(dbPath) {
+  fs.mkdirSync(Path.dirname(dbPath), { recursive: true });
+  const db = new DatabaseSync(dbPath);
+  db.exec(`
+    PRAGMA foreign_keys = ON;
+    PRAGMA journal_mode = WAL;
+    CREATE TABLE IF NOT EXISTS meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS sources (
+      source_path TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      archive_path TEXT,
+      entry_name TEXT,
+      fingerprint TEXT NOT NULL,
+      size_bytes INTEGER,
+      compressed_size_bytes INTEGER,
+      imported_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS sessions (
+      source_path TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      archive_path TEXT,
+      entry_name TEXT,
+      size_bytes INTEGER,
+      compressed_size_bytes INTEGER,
+      started_at TEXT,
+      finished_at TEXT,
+      duration_ms REAL NOT NULL,
+      lines INTEGER NOT NULL,
+      records INTEGER NOT NULL,
+      parse_errors INTEGER NOT NULL,
+      token_count_snapshots INTEGER NOT NULL,
+      skipped_token_count_snapshots INTEGER NOT NULL,
+      stats_json TEXT NOT NULL,
+      FOREIGN KEY(source_path) REFERENCES sources(source_path) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS usage_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_path TEXT NOT NULL,
+      line_no INTEGER,
+      timestamp TEXT,
+      date_key TEXT NOT NULL,
+      week_key TEXT NOT NULL,
+      month_key TEXT NOT NULL,
+      year_key TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      project TEXT NOT NULL,
+      effort TEXT NOT NULL,
+      input INTEGER NOT NULL,
+      cache_create_5m INTEGER NOT NULL,
+      cache_create_1h INTEGER NOT NULL,
+      cache_read INTEGER NOT NULL,
+      output INTEGER NOT NULL,
+      reasoning_output INTEGER NOT NULL,
+      context_window INTEGER NOT NULL,
+      priced INTEGER NOT NULL,
+      cost_usd REAL NOT NULL,
+      reasoning_cost_usd REAL NOT NULL,
+      cost_input_usd REAL NOT NULL,
+      cost_cache_create_5m_usd REAL NOT NULL,
+      cost_cache_create_1h_usd REAL NOT NULL,
+      cost_cache_read_usd REAL NOT NULL,
+      cost_output_usd REAL NOT NULL,
+      FOREIGN KEY(source_path) REFERENCES sources(source_path) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS rate_limit_samples (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_path TEXT,
+      line_no INTEGER,
+      sample_key TEXT NOT NULL,
+      group_key TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      timestamp_ms INTEGER NOT NULL,
+      limit_id TEXT,
+      limit_name TEXT,
+      plan_type TEXT,
+      kind TEXT NOT NULL,
+      window_minutes INTEGER,
+      used_percent REAL NOT NULL,
+      resets_at INTEGER NOT NULL,
+      reached INTEGER NOT NULL,
+      agent TEXT NOT NULL,
+      effort TEXT NOT NULL,
+      model TEXT NOT NULL,
+      input INTEGER NOT NULL,
+      cache_read INTEGER NOT NULL,
+      output INTEGER NOT NULL,
+      reasoning_output INTEGER NOT NULL,
+      priced INTEGER NOT NULL,
+      cost_usd REAL NOT NULL,
+      reasoning_cost_usd REAL NOT NULL,
+      FOREIGN KEY(source_path) REFERENCES sources(source_path) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_usage_events_time ON usage_events(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_usage_events_model ON usage_events(model);
+    CREATE INDEX IF NOT EXISTS idx_usage_events_project ON usage_events(project);
+    CREATE INDEX IF NOT EXISTS idx_rate_limit_samples_group_time ON rate_limit_samples(group_key, timestamp_ms, sequence);
+  `);
+  db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '1')").run();
+  return db;
+}
+
+async function withAsyncTransaction(db, fn) {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = await fn();
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function sourceFingerprint(parts) {
+  return Object.entries(parts)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}=${value ?? ""}`)
+    .join("|");
+}
+
+function existingSourceFingerprint(db, sourcePath) {
+  const row = db.prepare("SELECT fingerprint FROM sources WHERE source_path = ?").get(sourcePath);
+  return row?.fingerprint || null;
+}
+
+function deleteSourceRows(db, sourcePath) {
+  db.prepare("DELETE FROM usage_events WHERE source_path = ?").run(sourcePath);
+  db.prepare("DELETE FROM rate_limit_samples WHERE source_path = ?").run(sourcePath);
+  db.prepare("DELETE FROM sessions WHERE source_path = ?").run(sourcePath);
+  db.prepare("DELETE FROM sources WHERE source_path = ?").run(sourcePath);
+}
+
+function prepareSourceStatements(db) {
+  return {
+    insertSource: db.prepare(`
+    INSERT INTO sources(source_path, kind, archive_path, entry_name, fingerprint, size_bytes, compressed_size_bytes, imported_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `),
+    insertSession: db.prepare(`
+    INSERT INTO sessions(
+      source_path, kind, archive_path, entry_name, size_bytes, compressed_size_bytes,
+      started_at, finished_at, duration_ms, lines, records, parse_errors,
+      token_count_snapshots, skipped_token_count_snapshots, stats_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `),
+    insertUsage: db.prepare(`
+    INSERT INTO usage_events(
+      source_path, line_no, timestamp, date_key, week_key, month_key, year_key,
+      provider, model, project, effort,
+      input, cache_create_5m, cache_create_1h, cache_read, output, reasoning_output,
+      context_window, priced, cost_usd, reasoning_cost_usd,
+      cost_input_usd, cost_cache_create_5m_usd, cost_cache_create_1h_usd,
+      cost_cache_read_usd, cost_output_usd
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `),
+    insertRateLimit: db.prepare(`
+    INSERT INTO rate_limit_samples(
+      source_path, line_no, sample_key, group_key, sequence, timestamp_ms,
+      limit_id, limit_name, plan_type, kind, window_minutes,
+      used_percent, resets_at, reached, agent, effort, model,
+      input, cache_read, output, reasoning_output, priced, cost_usd, reasoning_cost_usd
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `),
+  };
+}
+
+function insertSourceRow(statement, source, fingerprint) {
+  statement.run(
+    source.path,
+    source.kind,
+    source.archivePath || null,
+    source.entryName || null,
+    fingerprint,
+    source.sizeBytes ?? null,
+    source.compressedSizeBytes ?? null,
+    new Date().toISOString(),
+  );
+}
+
+function insertSessionRow(statement, session) {
+  statement.run(
+    session.path,
+    session.kind,
+    session.archivePath || null,
+    session.entryName || null,
+    session.sizeBytes ?? null,
+    session.compressedSizeBytes ?? null,
+    session.startedAt || null,
+    session.finishedAt || null,
+    number(session.durationMs),
+    number(session.lines),
+    number(session.records),
+    number(session.parseErrors),
+    number(session.tokenCountSnapshots),
+    number(session.skippedTokenCountSnapshots),
+    JSON.stringify(session.stats),
+  );
+}
+
+function insertUsageEventRow(statement, event, defaultSourcePath) {
+  const timestamp = event.timestamp ? new Date(event.timestamp) : new Date(NaN);
+  statement.run(
+    event.sourcePath || defaultSourcePath,
+    event.lineNo,
+    event.timestamp,
+    dateKey(timestamp),
+    weekKey(timestamp),
+    monthKey(timestamp),
+    yearKey(timestamp),
+    event.provider,
+    event.model,
+    event.project,
+    event.effort,
+    event.usage.input,
+    event.usage.cacheCreate5m,
+    event.usage.cacheCreate1h,
+    event.usage.cacheRead,
+    event.usage.output,
+    event.usage.reasoningOutput,
+    event.usage.contextWindow,
+    event.cost.known ? 1 : 0,
+    number(event.cost.amount),
+    number(event.cost.reasoningAmount),
+    number(event.cost.breakdown.input),
+    number(event.cost.breakdown.cacheCreate5m),
+    number(event.cost.breakdown.cacheCreate1h),
+    number(event.cost.breakdown.cacheRead),
+    number(event.cost.breakdown.output),
+  );
+}
+
+function insertRateLimitSampleRow(statement, sample, defaultSourcePath) {
+  statement.run(
+    sample.sourcePath || defaultSourcePath,
+    sample.lineNo,
+    sample.key,
+    sample.groupKey,
+    sample.sequence,
+    sample.timestampMs,
+    sample.windowMeta.limitId,
+    sample.windowMeta.limitName,
+    sample.windowMeta.planType,
+    sample.windowMeta.kind,
+    sample.windowMeta.windowMinutes,
+    sample.usedPercent,
+    sample.resetsAt,
+    sample.reached ? 1 : 0,
+    sample.agent,
+    sample.effort,
+    sample.model,
+    sample.usage.input,
+    sample.usage.cacheRead,
+    sample.usage.output,
+    sample.usage.reasoningOutput,
+    sample.cost.known ? 1 : 0,
+    sample.cost.amount,
+    sample.cost.reasoningAmount,
+  );
+}
+
+async function processAndStoreSource(db, source, fingerprint, options) {
+  const statements = prepareSourceStatements(db);
+  return withAsyncTransaction(db, async () => {
+    deleteSourceRows(db, source.path);
+    insertSourceRow(statements.insertSource, source, fingerprint);
+
+    const report = newReport();
+    report._usageEventSink = (event) => insertUsageEventRow(statements.insertUsage, event, source.path);
+    report._rateLimitSampleSink = (sample) => insertRateLimitSampleRow(statements.insertRateLimit, sample, source.path);
+
+    if (source.kind === "jsonl") {
+      await processJsonlFile(source.path, report, options);
+    } else if (source.kind === "zip-entry") {
+      await processZipEntry(source.archivePath, source.entry, report, options);
+    } else {
+      throw new Error(`Unsupported database source kind: ${source.kind}`);
+    }
+
+    for (const session of report.sessions) {
+      insertSessionRow(statements.insertSession, session);
+    }
+    return report;
+  });
+}
+
+async function syncJsonlSource(db, input, options) {
+  const stat = await fsp.stat(input.path);
+  const fingerprint = sourceFingerprint({
+    kind: "jsonl",
+    size: stat.size,
+    mtimeMs: stat.mtimeMs,
+  });
+  if (existingSourceFingerprint(db, input.path) === fingerprint) return false;
+
+  const source = {
+    kind: "jsonl",
+    path: input.path,
+    sizeBytes: stat.size,
+  };
+  await processAndStoreSource(db, source, fingerprint, options);
+  return true;
+}
+
+async function syncZipSource(db, input, options, limiter) {
+  const stat = await fsp.stat(input.path);
+  const entries = (await listZipEntries(input.path))
+    .filter((entry) => entry.fileName.endsWith(".jsonl"))
+    .sort((a, b) => a.fileName.localeCompare(b.fileName));
+  logProgress(options, `[zip] ${input.path} size=${formatBytes(stat.size)} entries=${formatInt(entries.length)}`);
+
+  let changed = 0;
+  for (const entry of entries) {
+    if (!limiter.take()) continue;
+    const sourcePath = `${input.path}:${entry.fileName}`;
+    const fingerprint = sourceFingerprint({
+      kind: "zip-entry",
+      archiveSize: stat.size,
+      archiveMtimeMs: stat.mtimeMs,
+      entry: entry.fileName,
+      compressedSize: entry.compressedSize,
+      uncompressedSize: entry.uncompressedSize,
+      localHeaderOffset: entry.localHeaderOffset,
+    });
+    if (existingSourceFingerprint(db, sourcePath) === fingerprint) continue;
+
+    const source = {
+      kind: "zip-entry",
+      path: sourcePath,
+      archivePath: input.path,
+      entryName: entry.fileName,
+      sizeBytes: entry.uncompressedSize,
+      compressedSizeBytes: entry.compressedSize,
+      entry,
+    };
+    await processAndStoreSource(db, source, fingerprint, options);
+    changed += 1;
+  }
+  return changed > 0;
+}
+
+async function syncDatabase(options) {
+  const dbPath = resolveDbPath(options);
+  const db = openTokenomicsDatabase(dbPath);
+  try {
+    const inputs = await discoverInputs(options);
+    const limiter = createLimiter(options.limitFiles);
+    let changed = 0;
+    for (const input of inputs) {
+      if (input.kind === "jsonl") {
+        if (!limiter.take()) continue;
+        if (await syncJsonlSource(db, input, options)) changed += 1;
+      } else if (input.kind === "zip") {
+        if (await syncZipSource(db, input, options, limiter)) changed += 1;
+      }
+    }
+    const report = buildReportFromOpenDatabase(db, options);
+    logProgress(options, `[db] ${dbPath} changed_sources=${formatInt(changed)} sessions=${formatInt(report.sessions.length)}`);
+    return report;
+  } finally {
+    db.close();
+  }
+}
+
+function addStoredUsage(report, row) {
+  const timestamp = row.timestamp ? new Date(row.timestamp) : new Date(NaN);
+  const usage = {
+    input: number(row.input),
+    cacheCreate5m: number(row.cache_create_5m),
+    cacheCreate1h: number(row.cache_create_1h),
+    cacheRead: number(row.cache_read),
+    output: number(row.output),
+    reasoningOutput: number(row.reasoning_output),
+    contextWindow: number(row.context_window),
+  };
+  const cost = {
+    known: Boolean(row.priced),
+    amount: number(row.cost_usd),
+    reasoningAmount: number(row.reasoning_cost_usd),
+    breakdown: {
+      input: number(row.cost_input_usd),
+      cacheCreate5m: number(row.cost_cache_create_5m_usd),
+      cacheCreate1h: number(row.cost_cache_create_1h_usd),
+      cacheRead: number(row.cost_cache_read_usd),
+      output: number(row.cost_output_usd),
+    },
+  };
+  const provider = row.provider || "unknown";
+  const model = row.model || UNKNOWN_MODEL;
+  const project = row.project || UNKNOWN_PROJECT;
+  const effort = normalizeEffort(row.effort);
+
+  addToStats(report.total, usage, cost);
+  addToStats(bucket(report.daily, dateKey(timestamp)), usage, cost);
+  addToStats(bucket(report.weekly, weekKey(timestamp)), usage, cost);
+  addToStats(bucket(report.monthly, monthKey(timestamp)), usage, cost);
+  addToStats(bucket(report.yearly, yearKey(timestamp)), usage, cost);
+  addToStats(bucket(report.providers, provider), usage, cost);
+  addToStats(bucket(report.models, model), usage, cost);
+  addToStats(bucket(report.providerModels, `${provider}/${model}`), usage, cost);
+  addToStats(bucket(report.projects, project), usage, cost);
+  addToStats(nestedBucket(report.projectModels, project, model), usage, cost);
+  addToStats(bucket(report.efforts, effort), usage, cost);
+  addToStats(nestedBucket(report.modelEfforts, model, effort), usage, cost);
+
+  if (!cost.known) {
+    const key = `${provider}/${model}`;
+    report.unpricedModels[key] ??= { provider, model, requests: 0 };
+    report.unpricedModels[key].requests += 1;
+  }
+}
+
+function parseStoredStats(json) {
+  try {
+    const parsed = JSON.parse(json);
+    return {
+      ...newStats(),
+      ...parsed,
+      costsUsd: {
+        ...newCostBreakdown(),
+        ...(parsed.costsUsd || {}),
+      },
+    };
+  } catch {
+    return newStats();
+  }
+}
+
+function storedRateLimitCurrent(row) {
+  return {
+    key: row.sample_key,
+    groupKey: row.group_key,
+    sequence: number(row.sequence),
+    timestampMs: number(row.timestamp_ms),
+    windowMeta: {
+      limitId: row.limit_id,
+      limitName: row.limit_name,
+      planType: row.plan_type,
+      kind: row.kind,
+      windowMinutes: row.window_minutes,
+    },
+    usedPercent: number(row.used_percent),
+    resetsAt: number(row.resets_at),
+    reached: Boolean(row.reached),
+    sourcePath: row.source_path,
+    lineNo: row.line_no,
+    agent: row.agent,
+    effort: normalizeEffort(row.effort),
+    model: row.model || UNKNOWN_MODEL,
+    usage: {
+      input: number(row.input),
+      cacheCreate5m: 0,
+      cacheCreate1h: 0,
+      cacheRead: number(row.cache_read),
+      output: number(row.output),
+      reasoningOutput: number(row.reasoning_output),
+      contextWindow: 0,
+    },
+    cost: {
+      known: Boolean(row.priced),
+      amount: number(row.cost_usd),
+      reasoningAmount: number(row.reasoning_cost_usd),
+    },
+  };
+}
+
+function addStoredRateLimitSample(report, current, previous) {
+  const groupKey = current.groupKey || current.key;
+  const daily = rateLimitPeriodInfo(current, "daily");
+  const weekly = rateLimitPeriodInfo(current, "weekly");
+  const buckets = [
+    touchRateLimitStats(report.rateLimits.windows, groupKey, current, {
+      ...current.windowMeta,
+      agent: current.agent,
+    }),
+    touchRateLimitStats(report.rateLimits.daily, daily.key, current, {
+      ...current.windowMeta,
+      agent: current.agent,
+      periodType: "daily",
+      period: daily.period,
+    }),
+    touchRateLimitStats(report.rateLimits.weekly, weekly.key, current, {
+      ...current.windowMeta,
+      agent: current.agent,
+      periodType: "weekly",
+      period: weekly.period,
+    }),
+  ];
+
+  if (!previous) return;
+
+  if (current.timestampMs < previous.timestampMs) {
+    for (const bucket of buckets) bucket.stats.outOfOrder += 1;
+    return;
+  }
+
+  const sameWindow = current.resetsAt === previous.resetsAt;
+  if (sameWindow && current.resetsAt !== 0 && current.usedPercent < previous.usedPercent) {
+    for (const bucket of buckets) bucket.stats.ignoredNonMonotonic += 1;
+    return;
+  }
+
+  const elapsedMs = current.timestampMs - previous.timestampMs;
+  if (!sameWindow || current.usedPercent < previous.usedPercent) {
+    for (const bucket of buckets) {
+      bucket.stats.resets += 1;
+    }
+    if (elapsedMs > 0) {
+      for (const bucket of buckets) {
+        bucket.stats.resetGapMs += elapsedMs;
+        bucket.stats.maxResetGapMs = Math.max(bucket.stats.maxResetGapMs, elapsedMs);
+      }
+    }
+    return;
+  }
+
+  const deltaPercent = current.usedPercent - previous.usedPercent;
+  if (deltaPercent > 0) {
+    addRateLimitDelta(buckets, deltaPercent, elapsedMs, current);
+  }
+}
+
+function finalizeStoredRateLimits(db, report) {
+  report.rateLimits = { windows: {}, daily: {}, weekly: {} };
+  let previous = null;
+  let previousGroup = null;
+
+  for (const row of db.prepare("SELECT * FROM rate_limit_samples ORDER BY group_key, timestamp_ms, sequence, id").iterate()) {
+    const current = storedRateLimitCurrent(row);
+    const groupKey = current.groupKey || current.key;
+    const sameGroup = groupKey === previousGroup;
+    addStoredRateLimitSample(report, current, sameGroup ? previous : null);
+    previous = current;
+    previousGroup = groupKey;
+  }
+  report._rateLimitFinalized = true;
+}
+
+function buildReportFromOpenDatabase(db, options = {}) {
+  const report = newReport();
+  for (const row of db.prepare("SELECT * FROM usage_events ORDER BY timestamp, id").iterate()) {
+    addStoredUsage(report, row);
+  }
+
+  for (const row of db.prepare("SELECT * FROM sessions ORDER BY source_path").iterate()) {
+    report.sessions.push({
+      kind: row.kind,
+      path: row.source_path,
+      archivePath: row.archive_path,
+      entryName: row.entry_name,
+      sizeBytes: row.size_bytes,
+      compressedSizeBytes: row.compressed_size_bytes,
+      startedAt: row.started_at,
+      finishedAt: row.finished_at,
+      durationMs: number(row.duration_ms),
+      lines: number(row.lines),
+      records: number(row.records),
+      parseErrors: number(row.parse_errors),
+      tokenCountSnapshots: number(row.token_count_snapshots),
+      skippedTokenCountSnapshots: number(row.skipped_token_count_snapshots),
+      stats: parseStoredStats(row.stats_json),
+    });
+  }
+
+  const zipFiles = new Set();
+  for (const row of db.prepare("SELECT kind, archive_path FROM sources").iterate()) {
+    if (row.kind === "jsonl") report.sources.files += 1;
+    if (row.kind === "zip-entry") {
+      report.sources.zipEntries += 1;
+      if (row.archive_path) zipFiles.add(row.archive_path);
+    }
+  }
+  report.sources.zipFiles = zipFiles.size;
+  report.sources.parseErrors = report.sessions.reduce((sum, session) => sum + number(session.parseErrors), 0);
+  report.sources.tokenCountSnapshots = report.sessions.reduce((sum, session) => sum + number(session.tokenCountSnapshots), 0);
+  report.sources.skippedTokenCountSnapshots = report.sessions.reduce((sum, session) => sum + number(session.skippedTokenCountSnapshots), 0);
+
+  finalizeStoredRateLimits(db, report);
+  return report;
+}
+
+function buildReportFromDatabase(dbPath, options = {}) {
+  const db = openTokenomicsDatabase(resolveDbPath({ ...options, db: dbPath }));
+  try {
+    return buildReportFromOpenDatabase(db, options);
+  } finally {
+    db.close();
+  }
+}
+
+function serializableStats(stats) {
+  return {
+    ...stats,
+    costsUsd: { ...stats.costsUsd },
+  };
+}
+
+function topStats(data, top) {
+  return sortedEntries(data)
+    .slice(0, top)
+    .map(([name, stats]) => ({ name, ...serializableStats(stats) }));
+}
+
+function webSummary(report, options) {
+  return {
+    generatedAt: new Date().toISOString(),
+    sources: report.sources,
+    total: serializableStats(report.total),
+    topModels: topStats(report.models, options.top || 25),
+    topProjects: topStats(report.projects, options.top || 25),
+    topEfforts: topStats(report.efforts, options.top || 25),
+    daily: sortedEntries(report.daily).map(([name, stats]) => ({ name, ...serializableStats(stats) })),
+    rateLimits: report.rateLimits,
+    unpricedModels: Object.values(report.unpricedModels).sort((a, b) => b.requests - a.requests),
+  };
+}
+
+function sendJson(response, value, status = 200) {
+  const body = `${JSON.stringify(value, null, 2)}\n`;
+  response.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+  });
+  response.end(body);
+}
+
+function sendHtml(response, body, status = 200) {
+  response.writeHead(status, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+  });
+  response.end(body);
+}
+
+function dashboardHtml() {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tokenomics</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#f7f7f4; --fg:#202124; --muted:#687076; --line:#d9d9d2; --panel:#ffffff; --accent:#2563eb; --cache:#0f9f6e; --out:#c2410c; --warn:#b45309; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#111315; --fg:#f2f2ef; --muted:#a6adb4; --line:#30343a; --panel:#181b1f; --accent:#6ea8fe; --cache:#39d39f; --out:#ff9a62; --warn:#f5c36b; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:18px 24px; border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:2; }
+    h1 { margin:0; font-size:20px; letter-spacing:0; }
+    main { padding:24px; display:grid; gap:18px; max-width:1440px; margin:0 auto; }
+    .cards { display:grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap:12px; }
+    .card, section { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; }
+    .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+    .value { font-size:24px; font-weight:700; margin-top:4px; }
+    .grid { display:grid; grid-template-columns: 1.2fr .8fr; gap:18px; }
+    h2 { margin:0 0 12px; font-size:16px; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { padding:8px 10px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }
+    th:first-child, td:first-child { text-align:left; }
+    th { color:var(--muted); font-weight:600; font-size:12px; }
+    .bars { display:grid; gap:8px; }
+    .bar-row { display:grid; grid-template-columns:minmax(130px, 220px) 1fr 80px; gap:10px; align-items:center; }
+    .bar-track { height:22px; background:rgba(127,127,127,.15); border-radius:4px; overflow:hidden; display:flex; }
+    .seg-input { background:var(--accent); }
+    .seg-cache { background:var(--cache); }
+    .seg-output { background:var(--out); }
+    .muted { color:var(--muted); }
+    @media (max-width: 900px) { .cards, .grid { grid-template-columns:1fr; } header { align-items:flex-start; flex-direction:column; } .bar-row { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Tokenomics</h1>
+    <div class="muted" id="updated">Loading...</div>
+  </header>
+  <main>
+    <div class="cards" id="cards"></div>
+    <div class="grid">
+      <section>
+        <h2>Daily Cost</h2>
+        <div class="bars" id="daily"></div>
+      </section>
+      <section>
+        <h2>Cost By Model</h2>
+        <div class="bars" id="models"></div>
+      </section>
+    </div>
+    <section>
+      <h2>Sessions</h2>
+      <table>
+        <thead><tr><th>Session</th><th>Messages</th><th>Input</th><th>Cache read</th><th>Output</th><th>Cost</th></tr></thead>
+        <tbody id="sessions"></tbody>
+      </table>
+    </section>
+  </main>
+  <script>
+    const usd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+    const int = new Intl.NumberFormat();
+    const pct = (part, total) => total > 0 ? Math.max(0, (part / total) * 100) : 0;
+    const esc = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    function card(label, value) {
+      return '<div class="card"><div class="label">' + esc(label) + '</div><div class="value">' + esc(value) + '</div></div>';
+    }
+    function bar(name, stats, max) {
+      const total = stats.costUsd || 0;
+      const scale = max > 0 ? total / max : 0;
+      const width = Math.max(2, scale * 100);
+      const safeName = esc(name);
+      return '<div class="bar-row"><div title="' + safeName + '">' + safeName + '</div><div class="bar-track" style="width:' + width + '%">' +
+        '<div class="seg-input" style="width:' + pct((stats.costsUsd || {}).input || 0, total) + '%"></div>' +
+        '<div class="seg-cache" style="width:' + pct(((stats.costsUsd || {}).cacheRead || 0) + ((stats.costsUsd || {}).cacheCreate5m || 0) + ((stats.costsUsd || {}).cacheCreate1h || 0), total) + '%"></div>' +
+        '<div class="seg-output" style="width:' + pct((stats.costsUsd || {}).output || 0, total) + '%"></div>' +
+        '</div><div>' + usd.format(total) + '</div></div>';
+    }
+    async function load() {
+      const [summary, sessions] = await Promise.all([
+        fetch('/api/summary').then(r => r.json()),
+        fetch('/api/sessions').then(r => r.json()),
+      ]);
+      document.getElementById('updated').textContent = 'Updated ' + new Date(summary.generatedAt).toLocaleString();
+      document.getElementById('cards').innerHTML = [
+        card('Cost', usd.format(summary.total.costUsd || 0)),
+        card('Requests', int.format(summary.total.requests || 0)),
+        card('Input tokens', int.format(summary.total.input || 0)),
+        card('Cache read', int.format(summary.total.cacheRead || 0)),
+      ].join('');
+      const dailyMax = Math.max(0, ...summary.daily.map(row => row.costUsd || 0));
+      document.getElementById('daily').innerHTML = summary.daily.slice(-30).map(row => bar(row.name, row, dailyMax)).join('') || '<div class="muted">No data</div>';
+      const modelMax = Math.max(0, ...summary.topModels.map(row => row.costUsd || 0));
+      document.getElementById('models').innerHTML = summary.topModels.slice(0, 15).map(row => bar(row.name, row, modelMax)).join('') || '<div class="muted">No data</div>';
+      document.getElementById('sessions').innerHTML = sessions.slice(0, 100).map(session => '<tr><td title="' + esc(session.path) + '">' + esc(session.path) + '</td><td>' + int.format(session.stats.requests || 0) + '</td><td>' + int.format(session.stats.input || 0) + '</td><td>' + int.format(session.stats.cacheRead || 0) + '</td><td>' + int.format(session.stats.output || 0) + '</td><td>' + usd.format(session.stats.costUsd || 0) + '</td></tr>').join('');
+    }
+    load().catch(error => { document.body.innerHTML = '<main><section><h2>Failed to load dashboard</h2><pre>' + error.stack + '</pre></section></main>'; });
+  </script>
+</body>
+</html>`;
+}
+
+function handleWebRequest(request, response, options) {
+  if (request.method !== "GET") {
+    sendJson(response, { error: "method not allowed" }, 405);
+    return;
+  }
+
+  const url = new URL(request.url, `http://${request.headers.host || "127.0.0.1"}`);
+  try {
+    if (url.pathname === "/") {
+      sendHtml(response, dashboardHtml());
+      return;
+    }
+
+    const report = buildReportFromDatabase(options.db, options);
+    if (url.pathname === "/api/report") {
+      sendJson(response, report);
+    } else if (url.pathname === "/api/summary") {
+      sendJson(response, webSummary(report, options));
+    } else if (url.pathname === "/api/sessions") {
+      sendJson(response, report.sessions.slice().sort((a, b) => b.stats.costUsd - a.stats.costUsd));
+    } else {
+      sendJson(response, { error: "not found" }, 404);
+    }
+  } catch (error) {
+    sendJson(response, { error: error.message }, 500);
+  }
+}
+
+async function startWebServer(options) {
+  const db = resolveDbPath(options);
+  const serverOptions = { ...options, db };
+  const server = http.createServer((request, response) => handleWebRequest(request, response, serverOptions));
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(options.port, options.host, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  return server;
+}
+
 function parseArgs(argv) {
   const options = {
     source: "all",
@@ -1580,6 +2421,12 @@ function parseArgs(argv) {
     openaiContext: "auto",
     strictJson: false,
     output: null,
+    db: null,
+    sync: false,
+    webserver: false,
+    webserverSync: true,
+    host: "127.0.0.1",
+    port: 8787,
     progress: true,
     progressExplicit: false,
     paths: [],
@@ -1605,6 +2452,18 @@ function parseArgs(argv) {
     else if (arg.startsWith("--format=")) options.format = arg.slice("--format=".length);
     else if (arg === "--output" || arg === "-o") options.output = Path.resolve(next());
     else if (arg.startsWith("--output=")) options.output = Path.resolve(arg.slice("--output=".length));
+    else if (arg === "--db") options.db = Path.resolve(next());
+    else if (arg.startsWith("--db=")) options.db = Path.resolve(arg.slice("--db=".length));
+    else if (arg === "--sync") options.sync = true;
+    else if (arg === "--webserver") options.webserver = true;
+    else if (arg === "--host") options.host = next();
+    else if (arg.startsWith("--host=")) options.host = arg.slice("--host=".length);
+    else if (arg === "--port") options.port = Number(next());
+    else if (arg.startsWith("--port=")) options.port = Number(arg.slice("--port=".length));
+    else if (arg === "--no-sync") {
+      options.sync = false;
+      options.webserverSync = false;
+    }
     else if (arg === "--no-progress") {
       options.progress = false;
       options.progressExplicit = true;
@@ -1637,6 +2496,9 @@ function parseArgs(argv) {
   if (Number.isNaN(options.limitFiles) || options.limitFiles <= 0) {
     throw new Error("--limit-files must be a positive number");
   }
+  if (!Number.isInteger(options.port) || options.port < 0 || options.port > 65535) {
+    throw new Error("--port must be an integer from 0 to 65535");
+  }
   if (options.output && options.format === "text") {
     const ext = Path.extname(options.output).toLowerCase();
     if (ext === ".json") options.format = "json";
@@ -1662,6 +2524,12 @@ Options:
   --top N                         Rows to show per section (default: 25)
   --format text|json              Final report format (default: text, or inferred from --output .json)
   -o, --output PATH               Write final report to a .txt or .json file
+  --db PATH                       SQLite database path (default: ./tokenomics.sqlite for DB modes)
+  --sync                          Import changed sources into SQLite and report from the database
+  --webserver                     Serve a local browser dashboard from SQLite
+  --host HOST                     Webserver host (default: 127.0.0.1)
+  --port PORT                     Webserver port (default: 8787, use 0 for a random free port)
+  --no-sync                       Do not sync before --webserver
   --progress / --no-progress      Print per-session progress to stdout (default: progress on)
   --json                          Print machine-readable report JSON
   --strict-json                   Fail on malformed JSONL lines
@@ -1671,6 +2539,21 @@ Options:
 
 async function main(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
+  if (options.webserver) {
+    if (options.webserverSync) {
+      await syncDatabase(options);
+    }
+    const server = await startWebServer(options);
+    const address = server.address();
+    const host = address.address === "::" ? "localhost" : address.address;
+    logProgress(options, `[webserver] http://${host}:${address.port}`);
+    return server;
+  }
+  if (options.sync) {
+    const report = await syncDatabase(options);
+    await writeReport(report, options);
+    return report;
+  }
   const report = await buildReport(options);
   await writeReport(report, options);
   return report;
@@ -1687,6 +2570,7 @@ module.exports = {
   PRICING,
   PRICING_SOURCES,
   addUsage,
+  buildReportFromDatabase,
   buildReport,
   calculateCost,
   createLineProcessor,
@@ -1698,6 +2582,8 @@ module.exports = {
   processJsonlFile,
   processZipFile,
   renderReport,
+  startWebServer,
+  syncDatabase,
   usageFromClaudeUsage,
   usageFromCodexInfo,
   writeReport,

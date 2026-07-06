@@ -2,6 +2,9 @@ node_modules/
 coverage/
 .nyc_output/
 *.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 .env
 .env.*
 .DS_Store
