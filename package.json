@@ -1,0 +1,19 @@
+{
+  "name": "tokenomics",
+  "version": "0.0.1",
+  "description": "Counts tokens per session and counts different buckets (per project, per day, per week, per month, total)",
+  "keywords": [
+    "codex",
+    "claude",
+    "code",
+    "tokens"
+  ],
+  "license": "ISC",
+  "author": "Sergey Kuznetsov <github@rigelstar.com>",
+  "type": "commonjs",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "test": "node --test"
+  }
+}
