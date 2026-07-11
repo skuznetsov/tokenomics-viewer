@@ -16,6 +16,69 @@ logs or reports anywhere.
 ClickHouse mode uses the ClickHouse HTTP interface and still needs no npm
 dependencies.
 
+## Local ClickHouse with clickhousectl
+
+[`clickhousectl`](https://clickhouse.com/blog/getting-started-clickhousectl) is
+the official ClickHouse CLI for installing versions and managing isolated local
+servers. The installer also creates the shorter `chctl` command used below.
+
+Install it on macOS or Linux:
+
+```bash
+curl -fsSL https://clickhouse.com/cli | sh
+```
+
+The binary is installed under `~/.local/bin`. If your shell cannot find it, add
+that directory to `PATH` and restart the shell:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+clickhousectl --version
+chctl --version
+```
+
+Download the current stable ClickHouse release and make it the local default:
+
+```bash
+chctl local use stable
+chctl local which
+```
+
+From the Tokenomics Viewer repository, start a persistent named server on the
+HTTP port expected by the application:
+
+```bash
+chctl local server start --name tokenomics --http-port 8123 --tcp-port 9000
+chctl local server list
+curl http://127.0.0.1:8123/ping
+```
+
+The server runs in the background and stores its data under
+`.clickhouse/servers/tokenomics/`. Connect with the bundled ClickHouse client:
+
+```bash
+chctl local client --name tokenomics --query "SELECT version()"
+```
+
+Stop, restart, or permanently remove the local instance with:
+
+```bash
+chctl local server stop tokenomics
+chctl local server start --name tokenomics
+chctl local server stop tokenomics
+chctl local server remove tokenomics
+```
+
+If port `8123` is already occupied, omit `--http-port` and inspect the assigned
+port with `chctl local server list`, then pass it to Tokenomics Viewer:
+
+```bash
+chctl local server start --name tokenomics-alt
+./app.js --sync --db-engine clickhouse \
+  --clickhouse-url http://127.0.0.1:ASSIGNED_HTTP_PORT
+```
+
 ## Usage
 
 Run an in-memory text report over the default local roots:
@@ -63,7 +126,7 @@ Serve an existing database without rescanning logs:
 Use a local ClickHouse server instead of SQLite:
 
 ```bash
-chctl local server start
+chctl local server start --name tokenomics --http-port 8123 --tcp-port 9000
 ./app.js --sync --webserver --db-engine clickhouse
 ```
 
