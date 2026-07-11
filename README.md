@@ -79,8 +79,8 @@ server can absorb larger inserts or the client needs a lower memory ceiling.
 
 New ClickHouse tables are created with per-column codecs: ZSTD for text and
 stored JSON, Delta+ZSTD for counters and timestamps, Gorilla+ZSTD for floats,
-and T64+ZSTD for compact flags. Existing tables keep their old schema; recreate
-the app tables and resync with:
+and T64+ZSTD for compact flags. Compatible schema additions are applied in
+place. To discard and rebuild all Tokenomics-owned ClickHouse tables, use:
 
 ```bash
 ./app.js --sync --db-engine clickhouse --clickhouse-reset
@@ -140,13 +140,18 @@ Generated SQLite files and reports are ignored by `.gitignore`.
 - `usage_events`
 - `rate_limit_samples`
 
+Each source version is immutable. A sync stages changed sources and a complete
+source manifest, then publishes one global generation marker last. Reports pin
+that generation for every aggregation query, so a failed multi-source sync
+leaves the previous complete report visible instead of exposing a partial mix.
+
 The web dashboard reuses the report produced by startup sync instead of
 rebuilding it for every API request. In ClickHouse mode, summary buckets are
 computed with ClickHouse aggregations rather than streaming all usage rows into
 Node.js. Sync streams normalized rows into ClickHouse in bounded chunks, so large
 session files do not need to fit in the JavaScript heap. `--clickhouse-reset`
-drops and recreates the four Tokenomics tables before sync; use it when changing
-ClickHouse schema details such as codecs.
+drops and recreates all Tokenomics-owned tables before sync; normal upgrades do
+not require a reset.
 
 ## Web Dashboard
 

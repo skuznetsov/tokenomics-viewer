@@ -52,6 +52,35 @@ function createClickHouseServer({ failureStatus = null, failureBody = "", failur
   const activeRows = {};
   const acceptedInsertCounts = {};
   let injectedFailureTriggered = false;
+
+  function latestGeneration() {
+    return [...(activeRows.import_generations || [])].sort((a, b) => (
+      Number(b.committed_at_ms) - Number(a.committed_at_ms)
+      || String(b.generation_id).localeCompare(String(a.generation_id))
+    ))[0] || null;
+  }
+
+  function legacySourceRows() {
+    const current = new Map();
+    for (const row of activeRows.sources || []) {
+      if ((row.import_id || "") !== "") continue;
+      const previous = current.get(row.source_path);
+      if (!previous || Number(row.generation || 0) > Number(previous.generation || 0)) {
+        current.set(row.source_path, row);
+      }
+    }
+    return current;
+  }
+
+  function visibleRows(table, generationId = latestGeneration()?.generation_id) {
+    const manifest = new Map((activeRows.import_generation_sources || [])
+      .filter((row) => row.generation_id === generationId)
+      .map((row) => [row.source_path, row.import_id || ""]));
+    return (activeRows[table] || []).filter((row) => (
+      manifest.get(row.source_path) === (row.import_id || "")
+    ));
+  }
+
   const server = http.createServer((request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     let body = "";
@@ -119,17 +148,36 @@ function createClickHouseServer({ failureStatus = null, failureBody = "", failur
         activeRows[table] = (activeRows[table] || []).filter((row) => row.source_path !== sourcePath);
       }
 
-      if (query.includes("FROM sources") && query.includes("fingerprint")) {
-        const sourcePath = url.searchParams.get("param_source");
-        const source = (activeRows.sources || []).find((row) => row.source_path === sourcePath);
+      if (query.includes("FROM import_generations") && query.includes("committed_at_ms")) {
+        const generation = latestGeneration();
         response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-        response.end(source ? `${JSON.stringify({ fingerprint: source.fingerprint })}\n` : "");
+        response.end(generation ? `${JSON.stringify(generation)}\n` : "");
+        return;
+      }
+
+      if (query.includes("FROM import_generation_sources") && query.includes("source.fingerprint")) {
+        const generationId = url.searchParams.get("param_generation");
+        const rows = visibleRows("sources", generationId).map((row) => ({
+          source_path: row.source_path,
+          import_id: row.import_id || "",
+          fingerprint: row.fingerprint,
+        }));
+        response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+        response.end(rows.map((row) => JSON.stringify(row)).join("\n") + (rows.length ? "\n" : ""));
+        return;
+      }
+
+      if (query.includes("FROM sources") && query.includes("GROUP BY source_path")) {
+        const rows = [...legacySourceRows().values()];
+        response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+        response.end(rows.map((row) => JSON.stringify(row)).join("\n") + (rows.length ? "\n" : ""));
         return;
       }
 
       response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
       if (query.includes("FROM usage_events") && query.includes("UNION ALL")) {
-        const usageRows = (activeRows.usage_events || []).length;
+        const generationId = url.searchParams.get("param_generation");
+        const usageRows = visibleRows("usage_events", generationId).length;
         response.end(`${JSON.stringify({
           bucket: "total",
           key1: "",
@@ -160,14 +208,14 @@ function createClickHouseServer({ failureStatus = null, failureBody = "", failur
           pricedOutput: usageRows,
           pricedReasoningOutput: 0,
         })}\n`);
-      } else if (query.includes("FROM sources") && query.includes("countIf")) {
+      } else if (query.includes("FROM sources AS source") && query.includes("countIf")) {
         response.end(JSON.stringify({ files: 1, zipEntries: 0, zipFiles: 0 }) + "\n");
       } else {
         response.end("");
       }
     });
   });
-  return { acceptedInsertCounts, activeRows, inserts, requests, server };
+  return { acceptedInsertCounts, activeRows, inserts, requests, server, visibleRows };
 }
 
 async function withServer(mock, callback) {
@@ -212,6 +260,7 @@ test("ClickHouse sync streams usage rows in bounded insert chunks", async () => 
     assert.ok(queries.some((query) => query === "DROP TABLE IF EXISTS usage_events"));
     assert.ok(queries.some((query) => query === "DROP TABLE IF EXISTS sessions"));
     assert.ok(queries.some((query) => query === "DROP TABLE IF EXISTS codex_sessions"));
+    assert.ok(queries.some((query) => query === "DROP TABLE IF EXISTS import_generations"));
     assert.ok(queries.some((query) => query === "DROP TABLE IF EXISTS sources"));
     assert.ok(queries.some((query) => (
       query.includes("CREATE TABLE IF NOT EXISTS codex_sessions")
@@ -231,8 +280,8 @@ test("ClickHouse sync streams usage rows in bounded insert chunks", async () => 
     assert.ok(mock.inserts.usage_events.length > 1);
     assert.ok(mock.inserts.usage_events.every((insert) => insert.rows <= 100_000));
     assert.ok(mock.inserts.usage_events.every((insert) => insert.bytes <= 70 * 1024));
-    assert.equal(mock.inserts.codex_sessions.length, 1);
-    const storedSession = JSON.parse(mock.inserts.codex_sessions[0].body.trim());
+    assert.equal(mock.inserts.codex_session_versions.length, 1);
+    const storedSession = JSON.parse(mock.inserts.codex_session_versions[0].body.trim());
     assert.equal(storedSession.session_id, "019f4973-7053-7623-a798-0e4cf81ef014");
     assert.equal(storedSession.parent_session_id, "019f48d9-4ccc-73c2-bf45-a84e4951347e");
     assert.equal(storedSession.source_path, jsonl);
@@ -264,9 +313,9 @@ test("ClickHouse usage sink flushes independently on the row limit", async () =>
   assert.equal(mock.inserts.usage_events.reduce((sum, insert) => sum + insert.rows, 0), rows);
 });
 
-test("ClickHouse retries an unmarked partial source without duplicating rows", async () => {
-  const rows = 3;
-  const jsonl = createSessionFile({ rows });
+test("ClickHouse keeps the whole committed generation visible when a later source fails", async () => {
+  const first = createSessionFile({ rows: 2, sessionId: "019f4973-7053-7623-a798-0e4cf81ef014" });
+  const second = createSessionFile({ rows: 3, sessionId: "019f4973-7053-7623-a798-0e4cf81ef015" });
   const mock = createClickHouseServer({
     failureAfterInsert: {
       acceptedBatches: 1,
@@ -275,43 +324,146 @@ test("ClickHouse retries an unmarked partial source without duplicating rows", a
     },
   });
 
+  mock.activeRows.import_generations = [{ generation_id: "old-generation", committed_at_ms: 1 }];
+  mock.activeRows.import_generation_sources = [
+    { generation_id: "old-generation", source_path: first, import_id: "old-first" },
+    { generation_id: "old-generation", source_path: second, import_id: "old-second" },
+  ];
+  mock.activeRows.sources = [
+    { source_path: first, fingerprint: "old-first-fingerprint", import_id: "old-first" },
+    { source_path: second, fingerprint: "old-second-fingerprint", import_id: "old-second" },
+  ];
+  mock.activeRows.usage_events = [
+    { source_path: first, import_id: "old-first" },
+    { source_path: second, import_id: "old-second" },
+  ];
+  mock.activeRows.sessions = [
+    { source_path: first, import_id: "old-first" },
+    { source_path: second, import_id: "old-second" },
+  ];
+
   await withServer(mock, async (url) => {
     const options = defaultOptions({
       dbEngine: "clickhouse",
       clickhouseDatabase: "tokenomics_retry_test",
       clickhouseInsertBatchBytes: 1024 * 1024,
-      clickhouseInsertBatchRows: 2,
+      clickhouseInsertBatchRows: 100,
       clickhouseUrl: url,
-      paths: [jsonl],
+      paths: [first, second],
       progress: false,
     });
 
     await assert.rejects(syncDatabase(options), /injected batch failure/);
     assert.equal(mock.acceptedInsertCounts.usage_events, 1);
-    assert.equal(mock.activeRows.usage_events.length, 2);
-    assert.equal(mock.activeRows.sources?.length || 0, 0);
+    assert.ok(mock.activeRows.usage_events.length > mock.visibleRows("usage_events").length);
+    assert.equal(mock.activeRows.import_generations.length, 1);
+    assert.equal(mock.visibleRows("usage_events").length, 2);
+
+    const reportAfterFailure = await buildReportFromClickHouse(options);
+    assert.equal(reportAfterFailure.total.requests, 2);
 
     const report = await syncDatabase(options);
-    assert.equal(report.total.requests, rows);
-    assert.equal(mock.activeRows.usage_events.length, rows);
-    assert.equal(mock.activeRows.sessions.length, 1);
-    assert.equal(mock.activeRows.codex_sessions.length, 1);
-    assert.equal(mock.activeRows.sources.length, 1);
-
-    const sourceDeletesAfterRetry = mock.requests.filter((request) => (
+    assert.equal(report.total.requests, 5);
+    assert.equal(mock.visibleRows("usage_events").length, 5);
+    assert.equal(mock.visibleRows("sessions").length, 2);
+    assert.equal(mock.visibleRows("codex_session_versions").length, 2);
+    assert.equal(mock.visibleRows("sources").length, 2);
+    assert.equal(mock.activeRows.import_generations.length, 2);
+    assert.equal(mock.requests.filter((request) => (
       request.query.trim().startsWith("ALTER TABLE")
-      && request.url.searchParams.get("param_source") === jsonl
-    )).length;
-    assert.ok(sourceDeletesAfterRetry > 0);
+      && request.query.includes("DELETE WHERE")
+      && [first, second].includes(request.url.searchParams.get("param_source"))
+    )).length, 0);
 
+    const markerInsert = mock.requests.findLastIndex((request) => (
+      request.query.trim() === "INSERT INTO import_generations FORMAT JSONEachRow"
+    ));
+    const lastDataInsert = mock.requests.findLastIndex((request) => (
+      /^INSERT INTO (usage_events|output_char_metrics|rate_limit_samples|sessions|sources|codex_session_versions|import_generation_sources) FORMAT JSONEachRow$/.test(request.query.trim())
+    ));
+    assert.ok(markerInsert > lastDataInsert, "the global generation marker must be published last");
+
+    const generationsBeforeUnchangedSync = mock.activeRows.import_generations.length;
     await syncDatabase(options);
-    const sourceDeletesAfterUnchangedSync = mock.requests.filter((request) => (
-      request.query.trim().startsWith("ALTER TABLE")
-      && request.url.searchParams.get("param_source") === jsonl
-    )).length;
-    assert.equal(sourceDeletesAfterUnchangedSync, sourceDeletesAfterRetry);
-    assert.equal(mock.activeRows.usage_events.length, rows);
+    assert.equal(mock.visibleRows("usage_events").length, 5);
+    assert.equal(mock.activeRows.import_generations.length, generationsBeforeUnchangedSync);
   });
+});
+
+test("ClickHouse does not bootstrap staged rows after a failed first sync", async () => {
+  const first = createSessionFile({ rows: 1, sessionId: "019f4973-7053-7623-a798-0e4cf81ef021" });
+  const second = createSessionFile({ rows: 1, sessionId: "019f4973-7053-7623-a798-0e4cf81ef022" });
+  const mock = createClickHouseServer({
+    failureAfterInsert: {
+      acceptedBatches: 1,
+      body: "injected first-sync failure",
+      table: "usage_events",
+    },
+  });
+
+  await withServer(mock, async (url) => {
+    const options = defaultOptions({
+      dbEngine: "clickhouse",
+      clickhouseDatabase: "tokenomics_first_sync_retry_test",
+      clickhouseUrl: url,
+      paths: [first, second],
+      progress: false,
+    });
+
+    await assert.rejects(syncDatabase(options), /injected first-sync failure/);
+    assert.equal(mock.activeRows.import_generations?.length || 0, 0);
+    assert.ok((mock.activeRows.sources?.length || 0) > 0, "the first source should be physically staged");
+    assert.equal(mock.visibleRows("usage_events").length, 0);
+
+    const report = await syncDatabase(options);
+    assert.equal(report.total.requests, 2);
+    assert.equal(mock.activeRows.import_generations.length, 1);
+    assert.equal(mock.visibleRows("usage_events").length, 2);
+  });
+});
+
+test("ClickHouse report pins one committed generation across every query", async () => {
+  const mock = createClickHouseServer();
+  mock.activeRows.import_generations = [{ generation_id: "pinned-generation", committed_at_ms: 7 }];
+
+  await withServer(mock, async (url) => {
+    await buildReportFromClickHouse(defaultOptions({
+      clickhouseUrl: url,
+      clickhouseDatabase: "tokenomics_committed_views_test",
+    }));
+  });
+
+  const reportRequests = mock.requests.filter((request) => (
+    request.query.includes("import_generation_sources AS manifest")
+  ));
+  assert.ok(reportRequests.length >= 7);
+  for (const request of reportRequests) {
+    assert.equal(request.url.searchParams.get("param_generation"), "pinned-generation");
+    assert.doesNotMatch(request.query, /ANY INNER JOIN/);
+  }
+});
+
+test("ClickHouse legacy header union uses explicit migration-safe column order", async () => {
+  const mock = createClickHouseServer();
+  mock.activeRows.import_generations = [{ generation_id: "headers-generation", committed_at_ms: 9 }];
+
+  await withServer(mock, async (url) => {
+    await syncDatabase(defaultOptions({
+      dbEngine: "clickhouse",
+      clickhouseDatabase: "tokenomics_header_union_test",
+      clickhouseUrl: url,
+      paths: [Path.join(__dirname, "..", "README.md")],
+      progress: false,
+    }));
+  });
+
+  const query = mock.requests.find((request) => (
+    request.query.includes("FROM codex_session_versions")
+    && request.query.includes("FROM codex_sessions")
+  ))?.query;
+  assert.ok(query);
+  assert.doesNotMatch(query, /SELECT \* FROM codex_/);
+  assert.equal((query.match(/session_id, parent_session_id, source_path, import_id/g) || []).length, 2);
 });
 
 test("ClickHouse sync imports JSONL entries from ZIP sources", async () => {
@@ -319,6 +471,20 @@ test("ClickHouse sync imports JSONL entries from ZIP sources", async () => {
   const zip = Path.join(Path.dirname(jsonl), "sessions.zip");
   execFileSync("zip", ["-q", zip, Path.basename(jsonl)], { cwd: Path.dirname(jsonl) });
   const mock = createClickHouseServer();
+  const removedSource = `${zip}:removed.jsonl`;
+  mock.activeRows.import_generations = [{ generation_id: "old-zip-generation", committed_at_ms: 1 }];
+  mock.activeRows.import_generation_sources = [{
+    generation_id: "old-zip-generation",
+    source_path: removedSource,
+    import_id: "removed-import",
+  }];
+  mock.activeRows.sources = [{
+    source_path: removedSource,
+    import_id: "removed-import",
+    fingerprint: "removed-fingerprint",
+  }];
+  mock.activeRows.usage_events = [{ source_path: removedSource, import_id: "removed-import" }];
+  mock.activeRows.sessions = [{ source_path: removedSource, import_id: "removed-import" }];
 
   await withServer(mock, async (url) => {
     const report = await syncDatabase(defaultOptions({
@@ -332,6 +498,8 @@ test("ClickHouse sync imports JSONL entries from ZIP sources", async () => {
   });
 
   assert.equal(mock.inserts.usage_events.reduce((sum, insert) => sum + insert.rows, 0), 2);
+  assert.equal(mock.visibleRows("usage_events").length, 2);
+  assert.equal(mock.visibleRows("sources").some((row) => row.source_path === removedSource), false);
   const storedSession = JSON.parse(mock.inserts.sessions[0].body.trim());
   assert.equal(storedSession.kind, "zip-entry");
   assert.equal(storedSession.archive_path, zip);
@@ -385,12 +553,12 @@ test("ClickHouse bounds metadata, session, and source inserts by rows and bytes"
     assert.equal(report.total.requests, files.length);
   });
 
-  for (const table of ["codex_sessions", "sessions", "sources"]) {
+  for (const table of ["codex_session_versions", "sessions", "sources", "import_generation_sources"]) {
     assert.ok(mock.inserts[table]?.length > 0, `${table} should receive rows`);
     assert.ok(mock.inserts[table].every((insert) => insert.rows <= batchRows));
     assert.ok(mock.inserts[table].every((insert) => insert.rows === 1 || insert.bytes <= batchBytes));
   }
-  assert.ok(mock.inserts.codex_sessions.length > 1, "header inserts should split on the byte limit");
+  assert.ok(mock.inserts.codex_session_versions.length > 1, "header inserts should split on the byte limit");
 });
 
 test("ClickHouse requests carry database, auth, and bound query parameters", async () => {
@@ -417,7 +585,7 @@ test("ClickHouse requests carry database, auth, and bound query parameters", asy
     assert.equal(request.url.searchParams.get("output_format_json_quote_64bit_integers"), "0");
     assert.equal(request.headers.authorization, `Basic ${Buffer.from("test-user:test-password").toString("base64")}`);
   }
-  assert.ok(mock.requests.some((request) => request.url.searchParams.get("param_source") === jsonl));
+  assert.ok(mock.requests.some((request) => request.url.searchParams.get("param_generation")));
 });
 
 test("ClickHouse non-2xx responses include the server error", async () => {
