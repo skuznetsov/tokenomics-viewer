@@ -175,7 +175,7 @@ estimated spending.
 
 ## Pricing
 
-Pricing is a static table in `app.js`. Treat estimates as audit aids, not
+Pricing is a static table in `lib/core/pricing.js`. Treat estimates as audit aids, not
 billing truth. Verify current provider pricing before relying on the numbers for
 financial decisions.
 
@@ -195,6 +195,20 @@ metadata such as local paths, project names, timestamps, model names, and usage
 patterns. Do not publish generated output unless you have reviewed it.
 
 ## Development
+
+`app.js` is the executable composition root. Implementation is split by
+responsibility:
+
+- `lib/core/` contains report state, usage normalization, pricing, aggregation,
+  and rate-limit calculations.
+- `lib/ingest/` contains the JSONL parser, fork/replay handling, source
+  discovery, and ZIP reader.
+- `lib/storage/` contains independent SQLite and ClickHouse backends plus their
+  shared facade.
+- `lib/report/`, `lib/web-server.js`, and `lib/cli.js` contain presentation,
+  HTTP, and command-line boundaries.
+- `test/*.test.js` mirrors those domains; shared fixture builders live under
+  `test/support/`.
 
 Run tests:
 
