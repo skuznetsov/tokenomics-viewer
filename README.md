@@ -7,6 +7,40 @@ as text, JSON, SQLite-backed data, or a local web dashboard.
 The tool is local-first. It reads files from your machine and does not upload
 logs or reports anywhere.
 
+## One-line setup
+
+On macOS or Linux, install or update Tokenomics Viewer and start the guided
+setup with:
+
+```bash
+/bin/sh -c "$(curl -fsSL https://raw.githubusercontent.com/skuznetsov/tokenomics-viewer/main/install.sh)"
+```
+
+The installer does not use `sudo`. It installs versioned application files in
+`~/.local/share/tokenomics-viewer`, creates `tokenomics`, `tokenomics-viewer`,
+and `tokenomics-launch` commands in `~/.local/bin`, and then starts the guided
+launcher. If Node.js 26 or newer is unavailable, it installs a private Node.js
+26 runtime after verifying the archive against the official Node.js SHA-256
+manifest.
+
+The launcher asks whether to install and use ClickHouse, remembers the answer,
+runs the initial sync, starts the dashboard, and opens it in the default
+browser. SQLite data is kept across application updates at:
+
+```text
+~/.local/share/tokenomics-viewer/tokenomics.sqlite
+```
+
+Run the same one-line command again to update. To install without starting the
+dashboard, use:
+
+```bash
+TOKENOMICS_NO_LAUNCH=1 /bin/sh -c "$(curl -fsSL https://raw.githubusercontent.com/skuznetsov/tokenomics-viewer/main/install.sh)"
+```
+
+If `~/.local/bin` is not already on `PATH`, the installer prints the exact
+`export` command to add it. It does not modify shell startup files.
+
 ## Requirements
 
 - Node.js 26 or newer

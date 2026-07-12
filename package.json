@@ -14,6 +14,7 @@
   "main": "app.js",
   "files": [
     "app.js",
+    "install.sh",
     "launcher.js",
     "lib/",
     "public/",

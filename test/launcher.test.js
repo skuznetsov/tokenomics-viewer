@@ -11,6 +11,7 @@ const {
   ensureClickHouse,
   launcherAppArgs,
   loadLauncherState,
+  launcherDataPath,
   parseLauncherArgs,
   resetClickHouseChoice,
   runLauncher,
@@ -132,6 +133,34 @@ test("launcher app arguments enforce sync and selected engine after user argumen
   ]);
 });
 
+test("launcher stores SQLite data outside the application release", () => {
+  assert.equal(
+    launcherDataPath({ TOKENOMICS_DATA_HOME: "/var/tokenomics-data" }, "/home/user"),
+    Path.join("/var/tokenomics-data", "tokenomics-viewer", "tokenomics.sqlite"),
+  );
+  assert.equal(
+    launcherDataPath({ XDG_DATA_HOME: "/home/user/.xdg-data" }, "/home/user"),
+    Path.join("/home/user/.xdg-data", "tokenomics-viewer", "tokenomics.sqlite"),
+  );
+  assert.equal(
+    launcherDataPath({}, "/home/user"),
+    Path.join("/home/user", ".local", "share", "tokenomics-viewer", "tokenomics.sqlite"),
+  );
+});
+
+test("launcher pins SQLite to its persistent data path", () => {
+  assert.deepEqual(launcherAppArgs({
+    engine: "sqlite",
+    port: 8787,
+    sqliteDb: "/data/tokenomics.sqlite",
+    appArgs: ["--db", "/tmp/disposable.sqlite"],
+  }), [
+    "--db", "/tmp/disposable.sqlite",
+    "--sync", "--webserver", "--host", "127.0.0.1", "--port", "8787",
+    "--db-engine", "sqlite", "--db", "/data/tokenomics.sqlite",
+  ]);
+});
+
 test("launcher reuses an existing dashboard and starts a protected sync", async () => {
   const calls = [];
   const exitCode = await runLauncher([], {
@@ -177,12 +206,13 @@ test("launcher honors remembered SQLite choice and opens after readiness", async
     },
     waitForDashboard: async () => calls.push("ready"),
     openBrowser: async () => calls.push("open"),
+    sqliteDb: "/data/tokenomics.sqlite",
     interactive: false,
     log: () => {},
   });
   assert.equal(exitCode, 0);
   assert.deepEqual(calls, [
-    ["spawn", "--sync", "--webserver", "--host", "127.0.0.1", "--port", "8791", "--db-engine", "sqlite"],
+    ["spawn", "--sync", "--webserver", "--host", "127.0.0.1", "--port", "8791", "--db-engine", "sqlite", "--db", "/data/tokenomics.sqlite"],
     "ready",
     "open",
   ]);
