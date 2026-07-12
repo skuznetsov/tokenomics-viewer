@@ -98,6 +98,25 @@ test("dashboard html replaces sessions with a zoomable project canvas", () => {
   assert.doesNotMatch(html, /fetch\('\/api\/sessions'\)/);
 });
 
+test("dashboard html exposes the operational overview layout", () => {
+  const html = dashboardHtml();
+
+  assert.match(html, /id="app-header"/);
+  assert.match(html, /id="refresh-dashboard"/);
+  assert.match(html, /id="section-nav"/);
+  assert.match(html, /data-section-target="overview-section"/);
+  assert.match(html, /id="overview-section"/);
+  assert.match(html, /id="models-section"/);
+  assert.match(html, /id="projects-section"/);
+  assert.match(html, /id="efficiency-section"/);
+  assert.match(html, /id="daily-range-controls"/);
+  assert.match(html, /data-range-days="90"/);
+  assert.match(html, /id="model-ranking"/);
+  assert.match(html, /renderModelRanking/);
+  assert.match(html, /dailyRangeDays/);
+  assert.match(html, /syncSectionNav/);
+});
+
 test("dashboard summary truncates top rows and preserves null metric serialization", () => {
   const report = newReport();
   report.models["model-a"] = statsFixture({ costUsd: 2, visibleCharsPerTokenMin: null });
