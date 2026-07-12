@@ -239,6 +239,14 @@ Efficiency-table monetary metrics, cache share, and reasoning share use only
 priced requests; rows with no priced requests display `n/a` for price-derived
 values.
 
+The header switches between `Overview` and `Analyst` modes. Overview keeps the
+model ranking to ten rows and hides project/efficiency detail. Analyst exposes
+the full stored model list and the detailed project and efficiency sections.
+Both modes show deterministic recommendation findings generated from the same
+report. Recommendations include evidence, confidence, a concrete action, and a
+caveat; unpriced traffic is not assumed to be billable because subscription or
+intentionally non-billable models may have no API tariff.
+
 The server binds to `127.0.0.1` by default. Use `--host` only if you understand
 that reports can contain local file paths, project names, usage patterns, and
 estimated spending.

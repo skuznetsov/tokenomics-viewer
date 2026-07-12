@@ -15,6 +15,7 @@
     .brand-row { min-height:50px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:8px 20px; }
     .brand-group, .header-actions, .sync-state { display:flex; align-items:center; gap:10px; }
     .brand-group { min-width:0; }
+    .header-actions { flex-shrink:0; }
     .sync-state { min-width:0; max-width:min(70vw, 780px); color:var(--muted); font-size:12px; }
     #updated { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .status-dot { width:8px; height:8px; border-radius:50%; background:var(--cache); box-shadow:0 0 0 3px color-mix(in srgb, var(--cache) 15%, transparent); }
@@ -76,29 +77,51 @@
     .hover-legend strong { color:var(--fg); font-weight:650; max-width:360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .mix-pill { display:inline-flex; align-items:center; gap:5px; padding:3px 7px; border:1px solid var(--line); border-radius:999px; background:var(--soft); white-space:nowrap; }
     .muted { color:var(--muted); }
+    .recommendation-list { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); border-top:1px solid var(--line); }
+    .recommendation-item { min-width:0; padding:14px 16px; border-bottom:1px solid var(--line); }
+    .recommendation-item:nth-child(odd) { border-right:1px solid var(--line); }
+    .recommendation-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+    .recommendation-title { font-weight:700; }
+    .recommendation-impact { color:var(--out); font-weight:700; white-space:nowrap; }
+    .recommendation-item p { margin:8px 0 0; }
+    .recommendation-action { color:var(--fg); }
+    .recommendation-meta, .recommendation-caveat { color:var(--muted); font-size:12px; }
+    body[data-dashboard-mode="overview"] .analyst-only { display:none !important; }
+    body[data-dashboard-mode="overview"] .analysis-grid { grid-template-columns:1fr; }
     @media (max-width: 1180px) { .cards { grid-template-columns:repeat(3, minmax(0, 1fr)); } .card:nth-child(3) { border-right:0; } .card:nth-child(n+4) { border-top:1px solid var(--line); } .analysis-grid { grid-template-columns:1fr; } }
-    @media (max-width: 760px) { .cards { grid-template-columns:repeat(2, minmax(0, 1fr)); } .card, .card:nth-child(3) { border-right:1px solid var(--line); border-top:1px solid var(--line); } .card:nth-child(-n+2) { border-top:0; } .card:nth-child(2n) { border-right:0; } .card:last-child { grid-column:1 / -1; border-right:0; } .panel-head { display:grid; } .hover-legend { justify-content:flex-start; } }
-    @media (max-width: 560px) { .brand-row { align-items:flex-start; } .brand-group { align-items:flex-start; flex-direction:column; gap:3px; } .section-nav { gap:18px; } main { padding:12px; } .cards { grid-template-columns:1fr; } .card, .card:nth-child(3), .card:nth-child(2n) { border-right:0; border-top:1px solid var(--line); } .card:first-child { border-top:0; } .card:last-child { grid-column:auto; } .token-card .value { white-space:normal; } .chart-wrap, .compact-chart-wrap, .project-chart-wrap { min-height:330px; } .mix-canvas { height:330px; } .range-row { justify-content:flex-start; overflow:auto; } }
+    @media (max-width: 760px) { .cards { grid-template-columns:repeat(2, minmax(0, 1fr)); } .card, .card:nth-child(3) { border-right:1px solid var(--line); border-top:1px solid var(--line); } .card:nth-child(-n+2) { border-top:0; } .card:nth-child(2n) { border-right:0; } .card:last-child { grid-column:1 / -1; border-right:0; } .panel-head { display:grid; } .hover-legend { justify-content:flex-start; } .recommendation-list { grid-template-columns:1fr; } .recommendation-item:nth-child(odd) { border-right:0; } }
+    @media (max-width: 560px) { .brand-row { align-items:flex-start; } .brand-group { align-items:flex-start; flex-direction:column; gap:3px; } .sync-state { max-width:110px; } .section-nav { gap:18px; } main { padding:12px; } .cards { grid-template-columns:1fr; } .card, .card:nth-child(3), .card:nth-child(2n) { border-right:0; border-top:1px solid var(--line); } .card:first-child { border-top:0; } .card:last-child { grid-column:auto; } .token-card .value { white-space:normal; } .chart-wrap, .compact-chart-wrap, .project-chart-wrap { min-height:330px; } .mix-canvas { height:330px; } .range-row { justify-content:flex-start; overflow:auto; } }
+    @media (max-width: 360px) { .brand-row { flex-wrap:wrap; } .header-actions { width:100%; justify-content:space-between; } }
   </style>
 </head>
-<body>
+<body data-dashboard-mode="overview">
   <header class="app-header" id="app-header">
     <div class="brand-row">
       <div class="brand-group">
         <h1>Tokenomics</h1>
         <div class="sync-state" role="status" aria-live="polite"><span class="status-dot" id="sync-status-dot"></span><span id="updated">Loading...</span></div>
       </div>
-      <div class="header-actions"><button class="action-button" id="sync-dashboard" type="button" title="Scan logs and update the database" disabled>Sync</button></div>
+      <div class="header-actions">
+        <div class="segmented" id="dashboard-mode-controls" aria-label="Dashboard mode">
+          <button class="seg-button active" type="button" data-dashboard-mode="overview" aria-pressed="true">Overview</button>
+          <button class="seg-button" type="button" data-dashboard-mode="analyst" aria-pressed="false">Analyst</button>
+        </div>
+        <button class="action-button" id="sync-dashboard" type="button" title="Scan logs and update the database" disabled>Sync</button>
+      </div>
     </div>
     <nav class="section-nav" id="section-nav" aria-label="Dashboard sections">
-      <button class="nav-button active" type="button" data-section-target="overview-section">Overview</button>
-      <button class="nav-button" type="button" data-section-target="projects-section">Projects</button>
+      <button class="nav-button active" type="button" data-section-target="overview-section">Summary</button>
+      <button class="nav-button analyst-only" type="button" data-section-target="projects-section">Projects</button>
       <button class="nav-button" type="button" data-section-target="models-section">Models</button>
-      <button class="nav-button" type="button" data-section-target="efficiency-section">Efficiency</button>
+      <button class="nav-button analyst-only" type="button" data-section-target="efficiency-section">Efficiency</button>
     </nav>
   </header>
   <main>
     <section class="kpi-band" id="overview-section"><div class="cards" id="cards"></div></section>
+    <section id="recommendations-section">
+      <div class="panel-head"><h2>Recommended Actions</h2><div class="muted" id="recommendations-summary"></div></div>
+      <div class="recommendation-list" id="recommendations-list"></div>
+    </section>
     <section>
       <div class="panel-head">
         <div class="panel-title-stack">
@@ -134,7 +157,7 @@
         <div class="model-ranking" id="model-ranking"></div>
         <div class="compact-chart-wrap is-hidden" id="cost-chart-wrap"><canvas class="mix-canvas compact-canvas" id="cost-mix-canvas" role="img" aria-label="Cost mix by selected period"></canvas></div>
       </section>
-      <section id="projects-section">
+      <section class="analyst-only" id="projects-section">
         <div class="panel-head">
           <div class="panel-title-stack">
             <h2>Project Daily Cost</h2>
@@ -145,7 +168,7 @@
         <div class="project-chart-wrap"><canvas class="mix-canvas compact-canvas" id="project-cost-canvas" role="img" aria-label="Daily project cost with input, cache, and output cost mix"></canvas></div>
       </section>
     </div>
-    <section id="efficiency-section">
+    <section class="analyst-only" id="efficiency-section">
       <div class="panel-head">
         <h2>Efficiency</h2>
       </div>
@@ -820,6 +843,40 @@
     let cachedSummary = null;
     let costMixMode = 'models';
     let dailyRangeDays = 90;
+    const overviewModelLimit = 10;
+    let dashboardMode = storedDashboardMode();
+
+    function storedDashboardMode() {
+      try {
+        return localStorage.getItem('tokenomics-dashboard-mode') === 'analyst' ? 'analyst' : 'overview';
+      } catch {
+        return 'overview';
+      }
+    }
+
+    function applyDashboardMode({ persist = true } = {}) {
+      document.body.dataset.dashboardMode = dashboardMode;
+      document.querySelectorAll('#dashboard-mode-controls [data-dashboard-mode]').forEach(button => {
+        const active = button.dataset.dashboardMode === dashboardMode;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+      if (persist) {
+        try { localStorage.setItem('tokenomics-dashboard-mode', dashboardMode); } catch {}
+      }
+      if (dashboardMode === 'overview' && ['projects-section', 'efficiency-section'].includes(activeSectionTarget)) {
+        activeSectionTarget = 'overview-section';
+      }
+      if (cachedSummary) {
+        renderRecommendations(cachedSummary);
+        renderCostMix(cachedSummary);
+        requestAnimationFrame(() => {
+          renderDailyTokenChart(dailyRowsInRange(cachedSummary.daily));
+          if (dashboardMode === 'analyst') renderProjectDailyChart(selectedProjectFromSummary(cachedSummary));
+        });
+      }
+      syncSectionNav();
+    }
 
     function dailyRowsInRange(rows) {
       if (!Number.isFinite(dailyRangeDays) || !rows?.length) return rows || [];
@@ -849,11 +906,12 @@
 
     function renderModelRanking(summary) {
       const container = document.getElementById('model-ranking');
-      const rows = [...(summary.topModels || [])].sort((a, b) => (b.costUsd || 0) - (a.costUsd || 0)).slice(0, 10);
+      const allRows = [...(summary.models || summary.topModels || [])].sort((a, b) => (b.costUsd || 0) - (a.costUsd || 0));
+      const rows = dashboardMode === 'overview' ? allRows.slice(0, overviewModelLimit) : allRows;
       const maxCost = Math.max(1, ...rows.map(row => row.costUsd || 0));
       const totalCost = Math.max(1, summary.total?.costUsd || 0);
       document.getElementById('cost-mix-hover-legend').innerHTML =
-        '<span class="muted">' + esc(formatTokenCount(rows.length)) + ' models · ' + esc(formatUsdCompact(rows.reduce((sum, row) => sum + (row.costUsd || 0), 0))) + '</span>';
+        '<span class="muted">' + esc(formatTokenCount(rows.length)) + ' of ' + esc(formatTokenCount(allRows.length)) + ' models · ' + esc(formatUsdCompact(rows.reduce((sum, row) => sum + (row.costUsd || 0), 0))) + '</span>';
       container.innerHTML = '<table class="model-table"><thead><tr><th>Model</th><th>Cost</th><th>Share</th><th></th></tr></thead><tbody>' +
         rows.map(row => {
           const share = (row.costUsd || 0) / totalCost;
@@ -923,6 +981,28 @@
         '</tbody>';
     }
 
+    function renderRecommendations(summary) {
+      const container = document.getElementById('recommendations-list');
+      const allRows = summary.recommendations || [];
+      const rows = dashboardMode === 'overview' ? allRows.slice(0, 3) : allRows;
+      const summaryEl = document.getElementById('recommendations-summary');
+      summaryEl.textContent = rows.length ? rows.length + ' prioritized findings' : '';
+      if (!rows.length) {
+        container.innerHTML = '<div class="recommendation-item"><div class="recommendation-title">No high-confidence recommendations</div><p class="recommendation-meta">Current rules did not find a material, well-supported action.</p></div>';
+        return;
+      }
+      container.innerHTML = rows.map(row => (
+        '<article class="recommendation-item" data-recommendation-id="' + esc(row.id) + '">' +
+          '<div class="recommendation-head"><div class="recommendation-title">' + esc(row.title) + '</div>' +
+          (row.impactUsd == null ? '' : '<div class="recommendation-impact">Δ ' + esc(formatUsdCompact(row.impactUsd)) + '</div>') + '</div>' +
+          '<p>' + esc(row.finding) + '</p>' +
+          '<p class="recommendation-action"><strong>Action:</strong> ' + esc(row.action) + '</p>' +
+          '<p class="recommendation-meta">' + esc(row.confidence.toUpperCase()) + ' confidence · ' + esc(row.evidence) + '</p>' +
+          '<p class="recommendation-caveat">' + esc(row.caveat) + '</p>' +
+        '</article>'
+      )).join('');
+    }
+
     function selectedProjectFromSummary(summary) {
       const projects = summary?.projectDaily || [];
       const select = document.getElementById('project-select');
@@ -961,6 +1041,7 @@
         card('Cache Tokens', segmentCardText(summary.total, 'cache'), 'token-card'),
         card('Output Tokens', segmentCardText(summary.total, 'output'), 'token-card'),
       ].join('');
+      renderRecommendations(summary);
       renderDailyRangeControls();
       renderDailyTokenChart(dailyRowsInRange(summary.daily));
       renderCostMix(summary);
@@ -1165,6 +1246,12 @@
     document.getElementById('sync-dashboard').addEventListener('click', () => {
       startSync();
     });
+    document.getElementById('dashboard-mode-controls').addEventListener('click', event => {
+      const mode = event.target?.dataset?.dashboardMode;
+      if (!['overview', 'analyst'].includes(mode) || mode === dashboardMode) return;
+      dashboardMode = mode;
+      applyDashboardMode();
+    });
     let activeSectionTarget = 'overview-section';
     function syncSectionNav() {
       const analysisTop = document.getElementById('models-section').getBoundingClientRect().top;
@@ -1198,6 +1285,7 @@
     new ResizeObserver(() => { if (cachedSummary) renderDailyTokenChart(dailyRowsInRange(cachedSummary.daily)); }).observe(document.getElementById('daily-token-canvas'));
     new ResizeObserver(() => { if (cachedSummary) renderCostMix(cachedSummary); }).observe(document.getElementById('cost-mix-canvas'));
     new ResizeObserver(() => { if (cachedSummary) renderProjectDailyChart(selectedProjectFromSummary(cachedSummary)); }).observe(document.getElementById('project-cost-canvas'));
+    applyDashboardMode({ persist: false });
     initializeDashboard().catch(error => { document.body.innerHTML = '<main><section><h2>Failed to load dashboard</h2><pre>' + esc(error.stack || error.message) + '</pre></section></main>'; });
   </script>
 </body>

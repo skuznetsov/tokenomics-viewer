@@ -122,6 +122,28 @@ test("dashboard html exposes the operational overview layout", () => {
   assert.match(html, /renderModelRanking/);
   assert.match(html, /dailyRangeDays/);
   assert.match(html, /syncSectionNav/);
+  assert.match(html, /data-dashboard-mode="overview"/);
+  assert.match(html, /data-dashboard-mode="analyst"/);
+  assert.match(html, /id="recommendations-section"/);
+  assert.match(html, /renderRecommendations/);
+  assert.match(html, /dashboardMode/);
+  assert.match(html, /overviewModelLimit/);
+});
+
+test("dashboard summary keeps Luna available beyond the overview model limit", () => {
+  const report = newReport();
+  for (let index = 0; index < 12; index += 1) {
+    report.models[`model-${index}`] = statsFixture({ costUsd: 100 - index });
+  }
+  report.models["gpt-5.6-luna"] = statsFixture({ requests: 500, costUsd: 50 });
+
+  const summary = webSummary(report, defaultOptions({ top: 25 }));
+
+  assert.equal(summary.topModels.length, 13);
+  assert.ok(summary.topModels.some((model) => model.name === "gpt-5.6-luna"));
+  assert.equal(summary.models.length, 13);
+  assert.ok(summary.models.some((model) => model.name === "gpt-5.6-luna"));
+  assert.ok(Array.isArray(summary.recommendations));
 });
 
 test("dashboard summary truncates top rows and preserves null metric serialization", () => {
