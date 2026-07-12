@@ -81,6 +81,39 @@ chctl local server start --name tokenomics-alt
 
 ## Usage
 
+### Launcher
+
+For the guided local workflow, run:
+
+```bash
+./launcher.js
+```
+
+The launcher checks for an existing dashboard and ClickHouse, asks once whether
+ClickHouse should be installed and used, remembers that answer in
+`~/.config/tokenomics-viewer/launcher.json`, starts Tokenomics with sync enabled,
+waits for the dashboard to become ready, and opens the default browser. A
+declined ClickHouse prompt falls back to SQLite.
+
+Useful launcher controls:
+
+```bash
+./launcher.js --sqlite              # one-time SQLite override
+./launcher.js --clickhouse          # one-time ClickHouse override
+./launcher.js --no-open             # do not open a browser
+./launcher.js --reset-clickhouse-choice
+./launcher.js -- --source codex     # pass Tokenomics options after --
+```
+
+The reset command removes only the remembered ClickHouse decision and exits;
+the next normal launch asks again. In non-interactive environments with no
+remembered choice, the launcher uses SQLite without persisting a decline.
+
+When ClickHouse installation is accepted, the launcher downloads and executes
+the official `https://clickhouse.com/cli` installer, selects the stable local
+release, and starts the named `tokenomics` server on HTTP `8123` and TCP `9000`.
+Automatic installation is supported on macOS and Linux.
+
 Run an in-memory text report over the default local roots:
 
 ```bash
