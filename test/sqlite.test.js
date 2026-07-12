@@ -53,6 +53,30 @@ test("SQLite backend factory creates an empty database and report", () => {
   });
 });
 
+test("SQLite fork pre-scan excludes unchanged sources", async () => {
+  const tmp = fs.mkdtempSync(Path.join(os.tmpdir(), "tokenomics-sqlite-prescan-test-"));
+  const jsonl = Path.join(tmp, "session.jsonl");
+  const db = Path.join(tmp, "tokenomics.sqlite");
+  fs.writeFileSync(jsonl, '{"type":"session_meta","payload":{"id":"019f4973-7053-7623-a798-0e4cf81ef014"}}\n');
+  const forkCandidates = [];
+  const backend = createSqliteBackend({
+    createLimiter: () => ({ take: () => true }),
+    discoverInputs: async () => [{ kind: "jsonl", path: jsonl }],
+    processJsonlFile: async () => {},
+    processZipEntry: async () => {},
+    processingOptionsWithCodexForkRegistry: async (options) => {
+      forkCandidates.push([...options.codexSourcePaths]);
+      return options;
+    },
+  });
+  const options = defaultOptions({ db, progress: false });
+
+  await backend.syncSqliteDatabase(options);
+  await backend.syncSqliteDatabase(options);
+
+  assert.deepEqual(forkCandidates, [[jsonl], []]);
+});
+
 test("syncDatabase imports sources idempotently and replaces changed sessions", async () => {
   const tmp = fs.mkdtempSync(Path.join(os.tmpdir(), "tokenomics-db-test-"));
   const jsonl = Path.join(tmp, "session.jsonl");

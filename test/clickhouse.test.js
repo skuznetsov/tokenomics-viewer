@@ -233,6 +233,35 @@ test("ClickHouse backend exposes an independent factory", () => {
   assert.equal(typeof backend.syncClickHouseDatabase, "function");
 });
 
+test("ClickHouse fork pre-scan excludes unchanged sources", async () => {
+  const jsonl = createSessionFile({ rows: 1 });
+  const mock = createClickHouseServer();
+  const forkCandidates = [];
+  const backend = createClickHouseBackend({
+    createLimiter: () => ({ take: () => true }),
+    discoverInputs: async () => [{ kind: "jsonl", path: jsonl }],
+    processJsonlFile: async () => {},
+    processZipEntry: async () => {},
+    processingOptionsWithCodexForkRegistry: async (options) => {
+      forkCandidates.push([...options.codexSourcePaths]);
+      return options;
+    },
+  });
+
+  await withServer(mock, async (url) => {
+    const options = defaultOptions({
+      dbEngine: "clickhouse",
+      clickhouseUrl: url,
+      clickhouseDatabase: "tokenomics_unchanged_prescan_test",
+      progress: false,
+    });
+    await backend.syncClickHouseDatabase(options);
+    await backend.syncClickHouseDatabase(options);
+  });
+
+  assert.deepEqual(forkCandidates, [[jsonl], []]);
+});
+
 test("ClickHouse sync streams usage rows in bounded insert chunks", async () => {
   const rows = 20_050;
   const jsonl = createSessionFile({

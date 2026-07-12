@@ -1,6 +1,8 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
+const { once } = require("node:events");
 const fs = require("node:fs");
 const os = require("node:os");
 const Path = require("node:path");
@@ -195,6 +197,31 @@ test("streams stored, deflated, and data-descriptor entries with exact metadata"
   ]) {
     const { filename, entry: listed } = await listedEntry(makeZip([entry]));
     assert.deepEqual(await readStream(await openZipEntryStream(filename, listed)), entry.data);
+  }
+});
+
+test("destroying a ZIP entry stream closes its archive reader", async () => {
+  const fixture = await listedEntry(makeZip([{
+    name: "large.jsonl",
+    data: crypto.randomBytes(4 * 1024 * 1024),
+    method: 8,
+  }]));
+  const originalCreateReadStream = fs.createReadStream;
+  let archiveReader = null;
+  fs.createReadStream = (...args) => {
+    archiveReader = originalCreateReadStream(...args);
+    return archiveReader;
+  };
+
+  try {
+    const entryStream = await openZipEntryStream(fixture.filename, fixture.entry);
+    entryStream.once("data", () => entryStream.destroy());
+    await once(entryStream, "close");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(archiveReader?.destroyed, true);
+  } finally {
+    fs.createReadStream = originalCreateReadStream;
+    archiveReader?.destroy();
   }
 });
 
