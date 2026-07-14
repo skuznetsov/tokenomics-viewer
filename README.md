@@ -9,8 +9,7 @@ logs or reports anywhere.
 
 ## One-line setup
 
-On macOS or Linux, install or update Tokenomics Viewer and start the guided
-setup with:
+On macOS or Linux, install or update Tokenomics Viewer and start it with:
 
 ```bash
 /bin/sh -c "$(curl -fsSL https://raw.githubusercontent.com/skuznetsov/tokenomics-viewer/main/install.sh)"
@@ -18,21 +17,28 @@ setup with:
 
 The installer does not use `sudo`. It installs versioned application files in
 `~/.local/share/tokenomics-viewer`, creates `tokenomics`, `tokenomics-viewer`,
-and `tokenomics-launch` commands in `~/.local/bin`, and then starts the guided
+and `tokenomics-launch` commands in `~/.local/bin`, and then starts the
 launcher. If Node.js 26 or newer is unavailable, it installs a private Node.js
 26 runtime after verifying the archive against the official Node.js SHA-256
 manifest.
 
-The launcher asks whether to install and use ClickHouse, remembers the answer,
-runs the initial sync, starts the dashboard, and opens it in the default
-browser. SQLite data is kept across application updates at:
+ClickHouse is the launcher's default backend. The launcher installs it when
+needed, runs the initial sync, starts the dashboard, and opens it in the default
+browser without an interactive database-choice flow. SQLite remains available
+as an explicit opt-out, and its data is kept across application updates at:
 
 ```text
 ~/.local/share/tokenomics-viewer/tokenomics.sqlite
 ```
 
-Run the same one-line command again to update. To install without starting the
-dashboard, use:
+Run the same one-line command again to update. To install and opt out of
+ClickHouse in one command, pass the launcher flag through the shell:
+
+```bash
+/bin/sh -c "$(curl -fsSL https://raw.githubusercontent.com/skuznetsov/tokenomics-viewer/main/install.sh)" -- --sqlite
+```
+
+To install without starting the dashboard, use:
 
 ```bash
 TOKENOMICS_NO_LAUNCH=1 /bin/sh -c "$(curl -fsSL https://raw.githubusercontent.com/skuznetsov/tokenomics-viewer/main/install.sh)"
@@ -117,34 +123,30 @@ chctl local server start --name tokenomics-alt
 
 ### Launcher
 
-For the guided local workflow, run:
+For the default local workflow, run:
 
 ```bash
 ./launcher.js
 ```
 
-The launcher checks for an existing dashboard and ClickHouse, asks once whether
-ClickHouse should be installed and used, remembers that answer in
-`~/.config/tokenomics-viewer/launcher.json`, starts Tokenomics with sync enabled,
-waits for the dashboard to become ready, and opens the default browser. A
-declined ClickHouse prompt falls back to SQLite.
+The launcher uses ClickHouse by default, installs `clickhousectl` when needed,
+starts the named local server, runs Tokenomics with sync enabled, waits for the
+dashboard to become ready, and opens the default browser. It reuses an existing
+dashboard only when that process reports the requested backend. Older
+`~/.config/tokenomics-viewer/launcher.json` choice files are ignored.
 
 Useful launcher controls:
 
 ```bash
-./launcher.js --sqlite              # one-time SQLite override
-./launcher.js --clickhouse          # one-time ClickHouse override
+./launcher.js --sqlite              # opt out of ClickHouse for this launch
+./launcher.js --no-clickhouse       # explicit alias for --sqlite
+./launcher.js --clickhouse          # explicit ClickHouse (already the default)
 ./launcher.js --no-open             # do not open a browser
-./launcher.js --reset-clickhouse-choice
 ./launcher.js -- --source codex     # pass Tokenomics options after --
 ```
 
-The reset command removes only the remembered ClickHouse decision and exits;
-the next normal launch asks again. In non-interactive environments with no
-remembered choice, the launcher uses SQLite without persisting a decline.
-
-When ClickHouse installation is accepted, the launcher downloads and executes
-the official `https://clickhouse.com/cli` installer, selects the stable local
+Unless SQLite is explicitly selected, the launcher downloads and executes the
+official `https://clickhouse.com/cli` installer, selects the stable local
 release, and starts the named `tokenomics` server on HTTP `8123` and TCP `9000`.
 Automatic installation is supported on macOS and Linux.
 

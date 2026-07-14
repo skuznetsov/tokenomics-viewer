@@ -362,6 +362,7 @@ test("non-loopback webserver binding exposes status but rejects sync mutations",
     const base = `http://127.0.0.1:${server.address().port}`;
     const status = await fetch(`${base}/api/sync`).then((response) => response.json());
     assert.equal(status.sync.available, false);
+    assert.equal(status.sync.engine, "sqlite");
     assert.match(status.sync.unavailableReason, /loopback host/);
 
     const response = await fetch(`${base}/api/sync`, {

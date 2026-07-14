@@ -35,12 +35,17 @@ test("one-line installer is offline-testable, repeatable, and preserves data", a
   assert.equal((await fs.stat(Path.join(binDir, "tokenomics-launch"))).mode & 0o111, 0o111);
 
   const help = await execFile(Path.join(binDir, "tokenomics-launch"), ["--help"], { env });
-  assert.match(help.stdout, /reset-clickhouse-choice/);
+  assert.match(help.stdout, /ClickHouse.*default/i);
+  assert.match(help.stdout, /--no-clickhouse/);
+  assert.doesNotMatch(help.stdout, /reset-clickhouse-choice/);
 
   const dataMarker = Path.join(installRoot, "persistent-data-marker");
   await fs.writeFile(dataMarker, "keep me\n");
   const previousRelease = await fs.realpath(Path.join(installRoot, "current"));
-  await execFile("/bin/sh", [Path.join(root, "install.sh")], { env });
+  const second = await execFile("/bin/sh", [Path.join(root, "install.sh"), "--help"], {
+    env: { ...env, TOKENOMICS_NO_LAUNCH: "0" },
+  });
+  assert.match(second.stdout, /ClickHouse.*default/i, "installer must forward launcher flags");
   const nextRelease = await fs.realpath(Path.join(installRoot, "current"));
 
   assert.notEqual(nextRelease, previousRelease);

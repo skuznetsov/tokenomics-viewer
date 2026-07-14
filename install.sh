@@ -212,6 +212,6 @@ case ":${PATH:-}:" in
 esac
 
 if [ "${TOKENOMICS_NO_LAUNCH:-0}" != "1" ]; then
-  say "Starting the guided setup..."
-  "$BIN_DIR/tokenomics-launch"
+  say "Starting Tokenomics Viewer..."
+  "$BIN_DIR/tokenomics-launch" "$@"
 fi
