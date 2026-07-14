@@ -51,7 +51,41 @@ test("dashboard summary exposes chronological provider, model, and effort daily 
     Object.fromEntries(["input", "cacheRead", "output", "costUsd"].map((key) => [key, openai.daily[0][key]])),
     { input: 10, cacheRead: 2, output: 1, costUsd: 1 },
   );
+  assert.deepEqual(
+    Object.fromEntries(["pricedRequests", "pricedInput", "pricedCacheRead", "pricedOutput", "pricedReasoningOutput"].map((key) => [key, openai.daily[0][key]])),
+    { pricedRequests: 0, pricedInput: 0, pricedCacheRead: 0, pricedOutput: 0, pricedReasoningOutput: 0 },
+  );
   assert.equal(Object.hasOwn(openai.daily[0], "outputCharsPerTokenSum"), false, "date-filter payload should stay usage-only");
+});
+
+test("dashboard summary preserves priced cohort counters for model effort diagnostics", () => {
+  const report = newReport();
+  report.providerModelEffortDaily.openai = {
+    "gpt-5.6-sol": {
+      high: {
+        "2026-07-13": statsFixture({
+          requests: 4,
+          pricedRequests: 3,
+          pricedInput: 100,
+          pricedCacheRead: 900,
+          pricedOutput: 40,
+          pricedReasoningOutput: 10,
+          reasoningOutput: 12,
+          costUsd: 2,
+        }),
+      },
+    },
+  };
+
+  const summary = webSummary(report, defaultOptions());
+  const row = summary.providerModelEffortDaily[0].daily[0];
+
+  assert.equal(row.pricedRequests, 3);
+  assert.equal(row.pricedInput, 100);
+  assert.equal(row.pricedCacheRead, 900);
+  assert.equal(row.pricedOutput, 40);
+  assert.equal(row.pricedReasoningOutput, 10);
+  assert.equal(row.reasoningOutput, 12);
 });
 
 test("dashboard summary exposes per-project daily buckets for the project selector", () => {
@@ -80,10 +114,15 @@ test("dashboard html renders daily and cost mix with the shared canvas chart", (
   assert.match(html, /id="cost-mix-canvas"/);
   assert.match(html, /id="cost-mix-hover-legend"/);
   assert.match(html, /id="efficiency-table"/);
-  assert.match(html, /Output chars\/token p10\/avg\/p99/);
-  assert.match(html, /Total \$\/1M priced out/);
-  assert.match(html, /Output \$\/1M priced out/);
-  assert.match(html, /Avg \$\/priced request/);
+  assert.match(html, /Cost &amp; Resource Diagnostics/);
+  assert.match(html, /id="efficiency-model-select"/);
+  assert.match(html, /Amortized \$\/1M output/);
+  assert.match(html, /Output tariff \$\/1M/);
+  assert.match(html, /Avg \$\/covered event/);
+  assert.match(html, /Tariff coverage/);
+  assert.doesNotMatch(html, /Output chars\/token p10\/avg\/p99/);
+  assert.doesNotMatch(html, /Total \$\/1M priced out/);
+  assert.doesNotMatch(html, /Avg \$\/priced request/);
   assert.match(html, /Input Tokens/);
   assert.match(html, /Cache Tokens/);
   assert.match(html, /Output Tokens/);
@@ -117,6 +156,10 @@ test("dashboard html replaces sessions with a zoomable project canvas", () => {
   assert.match(html, /renderProjectDailyChart/);
   assert.match(html, /addEventListener\('wheel'/);
   assert.match(html, /zoomSharedChartAt/);
+  assert.match(html, /WHEEL_ZOOM_DELTA_STEP/);
+  assert.match(html, /wheelZoomDelta/);
+  assert.match(html, /consumeWheelZoomSteps/);
+  assert.doesNotMatch(html, /direction < 0 \? 0\.72 : 1\.38/);
   assert.match(html, /drawSharedSelection/);
   assert.match(html, /bindSharedMixCanvas\(projectChart\)/);
   assert.match(html, /pinnedIndex: null/);

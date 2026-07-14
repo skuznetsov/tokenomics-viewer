@@ -277,6 +277,10 @@ Each source version is immutable. A sync stages changed sources and a complete
 source manifest, then publishes one global generation marker last. Reports pin
 that generation for every aggregation query, so a failed multi-source sync
 leaves the previous complete report visible instead of exposing a partial mix.
+Source fingerprints include independent analytics-derivation and pricing-catalog
+versions. Bumping either version automatically reimports unchanged source files,
+so stored token splits and estimated costs cannot silently outlive the code that
+derived them. Database schema versioning remains a separate concern.
 
 The web dashboard reuses the report produced by startup sync instead of
 rebuilding it for every API request. In ClickHouse mode, summary buckets are
@@ -298,20 +302,23 @@ not require a reset.
 - `/api/sync/events` live sync progress over server-sent events
 
 The dashboard shows canvas-based daily token-flow, cost-mix, and per-project
-daily cost charts with mouse-wheel zoom and drag selection. Hover labels use the
-same `tokens / $amount / percent` format for input, cache, and output. The
-dashboard also includes global efficiency cards and an effort table with
-priced-request share, total cost per priced token/output, output-only cost per
-priced output token, cache share, reasoning share, and approximate request-level
-output `chars/token` p10/avg/p99 metrics. Output `chars/token` samples above
-10 are treated as log-shape outliers and excluded from the displayed range.
-Efficiency-table monetary metrics, cache share, and reasoning share use only
-priced requests; rows with no priced requests display `n/a` for price-derived
-values.
+daily cost charts with accumulated mouse-wheel zoom and drag selection. Small
+trackpad deltas are accumulated before changing the visible range. Hover labels
+use the same `tokens / $amount / percent` format for input, cache, and output.
+
+Analyst mode includes `Cost & Resource Diagnostics`. It reuses the Models date
+range and compares effort rows only within one selected provider/model cohort.
+The table reports usage-event count, tariff coverage, estimated spend, covered
+input/cache/output per event, amortized total spend per output, output tariff,
+cache-read share, and reasoning share. `Tariff coverage` means that the local
+pricing catalog recognized an event; it does not prove that the event was billed.
+`Usage event` is also deliberately not labeled as a user request or completed
+task. Without outcome or quality data the section remains descriptive and does
+not rank effort levels by efficiency.
 
 The header switches between `Overview` and `Analyst` modes. Overview keeps the
-model ranking to ten rows and hides project/efficiency detail. Analyst exposes
-the full stored model list and the detailed project and efficiency sections.
+model ranking to ten rows and hides project/diagnostics detail. Analyst exposes
+the full stored model list and the detailed project and diagnostics sections.
 Both modes show deterministic recommendation findings generated from the same
 report. Recommendations include evidence, confidence, a concrete action, and a
 caveat; unpriced traffic is not assumed to be billable because subscription or

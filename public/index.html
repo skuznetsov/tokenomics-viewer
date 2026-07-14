@@ -124,7 +124,7 @@
       <button class="nav-button active" type="button" data-section-target="overview-section">Summary</button>
       <button class="nav-button analyst-only" type="button" data-section-target="projects-section">Projects</button>
       <button class="nav-button" type="button" data-section-target="models-section">Models</button>
-      <button class="nav-button analyst-only" type="button" data-section-target="efficiency-section">Efficiency</button>
+      <button class="nav-button analyst-only" type="button" data-section-target="efficiency-section">Diagnostics</button>
     </nav>
   </header>
   <main>
@@ -206,7 +206,11 @@
     </section>
     <section class="analyst-only" id="efficiency-section">
       <div class="panel-head">
-        <h2>Efficiency</h2>
+        <div class="panel-title-stack">
+          <h2>Cost &amp; Resource Diagnostics</h2>
+          <div class="muted" id="efficiency-summary"></div>
+        </div>
+        <select class="control-select" id="efficiency-model-select" aria-label="Diagnostics model"></select>
       </div>
       <div class="table-scroll">
         <table id="efficiency-table"></table>
@@ -308,32 +312,8 @@
       return 0;
     }
 
-    function pricedTotalTokens(row = {}) {
-      const explicit = (row.pricedInput || 0) + pricedTokenCache(row) + (row.pricedOutput || 0);
-      if (explicit > 0) return explicit;
-      if (row.pricedRequests > 0 && row.pricedRequests === row.requests) return totalTokens(row);
-      return 0;
-    }
-
     function pricedCost(row = {}) {
       return row.pricedRequests > 0 ? (row.costUsd || 0) : null;
-    }
-
-    function outputCharsPerTokenAvg(row = {}) {
-      return row.outputCharTokenSamples > 0 ? (row.outputCharsPerTokenSum || 0) / row.outputCharTokenSamples : 0;
-    }
-
-    function formatDecimal(value, digits = 2) {
-      return Number.isFinite(value) ? value.toFixed(digits) : '-';
-    }
-
-    function formatCharTokenRange(row = {}) {
-      if (!row.outputCharTokenSamples) return '-';
-      return [
-        row.outputCharsPerTokenP10 ?? row.outputCharsPerTokenMin,
-        outputCharsPerTokenAvg(row),
-        row.outputCharsPerTokenP99 ?? row.outputCharsPerTokenMax,
-      ].map(value => formatDecimal(value, 2)).join(' / ');
     }
 
     function totalCostPerMillionOutput(row = {}) {
@@ -360,6 +340,11 @@
 
     function pricedShare(row = {}) {
       return row.requests > 0 ? (row.pricedRequests || 0) / row.requests : 0;
+    }
+
+    function cacheReadShare(row = {}) {
+      const prompt = (row.pricedInput || 0) + pricedTokenCache(row);
+      return prompt > 0 ? (row.pricedCacheRead || 0) / prompt : null;
     }
 
     function tokenMix(row = {}) {
@@ -450,7 +435,10 @@
       zoom: { start: 0, end: 0 },
       dataKey: null,
       config: null,
+      wheelZoomDelta: 0,
     };
+    const WHEEL_ZOOM_DELTA_STEP = 80;
+    const WHEEL_ZOOM_FACTOR = 1.16;
     function createSharedMixChart(canvasId, legendId) {
       return {
         canvasId,
@@ -464,6 +452,7 @@
         plot: null,
         dataKey: null,
         config: null,
+        wheelZoomDelta: 0,
       };
     }
 
@@ -521,13 +510,24 @@
       if (count <= 1 || !chart.plot) return;
       const range = visibleSharedRange(chart);
       const currentLength = range.end - range.start + 1;
-      const factor = direction < 0 ? 0.72 : 1.38;
+      const steps = Math.max(1, Math.abs(direction));
+      const factor = direction < 0 ? Math.pow(1 / WHEEL_ZOOM_FACTOR, steps) : Math.pow(WHEEL_ZOOM_FACTOR, steps);
       let nextLength = clamp(Math.round(currentLength * factor), Math.min(3, count), count);
       if (nextLength === currentLength) nextLength = clamp(currentLength + (direction < 0 ? -1 : 1), Math.min(3, count), count);
       const ratio = clamp((canvasX - chart.plot.left) / chart.plot.width, 0, 1);
       const anchor = range.start + ratio * (currentLength - 1);
       const nextStart = Math.round(anchor - ratio * (nextLength - 1));
       applySharedZoom(chart, nextStart, nextStart + nextLength - 1);
+    }
+
+    function consumeWheelZoomSteps(chart, deltaY) {
+      if (!Number.isFinite(deltaY) || deltaY === 0) return 0;
+      if (chart.wheelZoomDelta && Math.sign(chart.wheelZoomDelta) !== Math.sign(deltaY)) chart.wheelZoomDelta = 0;
+      chart.wheelZoomDelta += deltaY;
+      const rawSteps = Math.trunc(chart.wheelZoomDelta / WHEEL_ZOOM_DELTA_STEP);
+      if (!rawSteps) return 0;
+      chart.wheelZoomDelta -= rawSteps * WHEEL_ZOOM_DELTA_STEP;
+      return clamp(rawSteps, -3, 3);
     }
 
     function sharedIndexFromX(chart, canvasX) {
@@ -866,8 +866,10 @@
       });
       canvas.addEventListener('wheel', event => {
         event.preventDefault();
+        const steps = consumeWheelZoomSteps(chart, event.deltaY);
+        if (!steps) return;
         const rect = canvas.getBoundingClientRect();
-        zoomSharedChartAt(chart, event.clientX - rect.left, event.deltaY);
+        zoomSharedChartAt(chart, event.clientX - rect.left, steps);
       }, { passive: false });
       canvas.addEventListener('dblclick', () => {
         chart.zoom.start = 0;
@@ -881,6 +883,7 @@
     let dailyRangeDays = 90;
     let modelDateMode = 'relative';
     let modelRelativeDays = Infinity;
+    let efficiencyModelKey = null;
     const overviewModelLimit = 10;
     let dashboardMode = storedDashboardMode();
 
@@ -908,7 +911,7 @@
       if (cachedSummary) {
         renderRecommendations(cachedSummary);
         renderCostMix(cachedSummary);
-        renderModels(cachedSummary);
+        renderModelAnalysis(cachedSummary);
         requestAnimationFrame(() => {
           renderDailyTokenChart(dailyRowsInRange(cachedSummary.daily));
           if (dashboardMode === 'analyst') renderProjectDailyChart(selectedProjectFromSummary(cachedSummary));
@@ -946,19 +949,34 @@
     function emptyPeriodStats() {
       return {
         requests: 0,
+        pricedRequests: 0,
+        unpricedRequests: 0,
         input: 0,
         cacheCreate5m: 0,
         cacheCreate30m: 0,
         cacheCreate1h: 0,
         cacheRead: 0,
         output: 0,
+        reasoningOutput: 0,
+        pricedInput: 0,
+        pricedCacheCreate5m: 0,
+        pricedCacheCreate30m: 0,
+        pricedCacheCreate1h: 0,
+        pricedCacheRead: 0,
+        pricedOutput: 0,
+        pricedReasoningOutput: 0,
         costUsd: 0,
         costsUsd: { input: 0, cacheCreate5m: 0, cacheCreate30m: 0, cacheCreate1h: 0, cacheRead: 0, output: 0 },
       };
     }
 
     function addPeriodStats(target, row = {}) {
-      for (const key of ['requests', 'input', 'cacheCreate5m', 'cacheCreate30m', 'cacheCreate1h', 'cacheRead', 'output', 'costUsd']) {
+      for (const key of [
+        'requests', 'pricedRequests', 'unpricedRequests',
+        'input', 'cacheCreate5m', 'cacheCreate30m', 'cacheCreate1h', 'cacheRead', 'output', 'reasoningOutput',
+        'pricedInput', 'pricedCacheCreate5m', 'pricedCacheCreate30m', 'pricedCacheCreate1h', 'pricedCacheRead', 'pricedOutput', 'pricedReasoningOutput',
+        'costUsd',
+      ]) {
         target[key] += row[key] || 0;
       }
       for (const key of ['input', 'cacheCreate5m', 'cacheCreate30m', 'cacheCreate1h', 'cacheRead', 'output']) {
@@ -1109,6 +1127,11 @@
         (rows.length ? '<tfoot>' + modelTableRow({ provider: '', model: 'Total', effort: '', ...totalStats }, totalStats.costUsd || 0, true) + '</tfoot>' : '');
     }
 
+    function renderModelAnalysis(summary) {
+      renderModels(summary);
+      renderEfficiency(summary);
+    }
+
     function renderCostMix(summary) {
       renderCostMixControls();
       const rows = costMixRows(summary);
@@ -1129,26 +1152,46 @@
 
     function renderEfficiency(summary) {
       const table = document.getElementById('efficiency-table');
-      if (!table) return;
-      const rows = summary.topEfforts || [];
+      const select = document.getElementById('efficiency-model-select');
+      if (!table || !select) return;
+      const { range, rows: allRows } = modelEffortRowsInRange(summary);
+      const models = collapseModelRows(allRows);
+      const options = models.map(row => ({
+        key: JSON.stringify([row.provider, row.model]),
+        label: row.model + ' · ' + row.provider,
+      }));
+      if (!options.some(option => option.key === efficiencyModelKey)) efficiencyModelKey = options[0]?.key || null;
+      select.innerHTML = options.length
+        ? options.map(option => '<option value="' + esc(option.key) + '">' + esc(option.label) + '</option>').join('')
+        : '<option value="">No model data</option>';
+      select.disabled = options.length === 0;
+      if (efficiencyModelKey) select.value = efficiencyModelKey;
+      const [provider, model] = efficiencyModelKey ? JSON.parse(efficiencyModelKey) : ['', ''];
+      const rows = allRows.filter(row => row.provider === provider && row.model === model);
+      document.getElementById('efficiency-summary').textContent = rows.length
+        ? formatModelPeriod(range) + ' · descriptive usage events only · no outcome-adjusted efficiency verdict'
+        : 'No comparable model/effort cohorts in this period';
       table.innerHTML = '<thead><tr>' +
-        '<th>Effort</th><th>Requests</th><th>Priced</th><th>Cost (priced)</th><th>Avg $/priced request</th>' +
-        '<th>Total $/1M priced out</th><th>Output $/1M priced out</th><th>Cache (priced)</th><th>Reasoning (priced)</th><th>Output chars/token p10/avg/p99</th>' +
+        '<th>Effort</th><th>Usage events</th><th>Tariff coverage</th><th>Estimated spend</th><th>Avg $/covered event</th>' +
+        '<th>Input / covered event</th><th>Cache / covered event</th><th>Output / covered event</th>' +
+        '<th>Amortized $/1M output</th><th>Output tariff $/1M</th><th>Cache-read share</th><th>Reasoning share</th>' +
         '</tr></thead><tbody>' +
         rows.map(row => (
           '<tr>' +
-          '<td>' + esc(row.name) + '</td>' +
+          '<td>' + esc(effortLabel(row)) + '</td>' +
           '<td>' + esc(formatTokenCount(row.requests || 0)) + '</td>' +
           '<td>' + esc(formatPct(pricedShare(row))) + '</td>' +
           '<td>' + esc(formatNullableUsd(pricedCost(row))) + '</td>' +
           '<td>' + esc(formatNullableUsd(avgPricedCost(row))) + '</td>' +
+          '<td>' + esc(row.pricedRequests > 0 ? formatTokenCount((row.pricedInput || 0) / row.pricedRequests) : 'n/a') + '</td>' +
+          '<td>' + esc(row.pricedRequests > 0 ? formatTokenCount(pricedTokenCache(row) / row.pricedRequests) : 'n/a') + '</td>' +
+          '<td>' + esc(row.pricedRequests > 0 ? formatTokenCount(pricedOutputTokens(row) / row.pricedRequests) : 'n/a') + '</td>' +
           '<td>' + esc(formatNullableUsd(totalCostPerMillionOutput(row))) + '</td>' +
           '<td>' + esc(formatNullableUsd(outputCostPerMillionOutput(row))) + '</td>' +
-          '<td>' + esc(formatRatio(pricedTokenCache(row), pricedTotalTokens(row))) + '</td>' +
+          '<td>' + esc(Number.isFinite(cacheReadShare(row)) ? formatPct(cacheReadShare(row)) : 'n/a') + '</td>' +
           '<td>' + esc(formatRatio(row.pricedReasoningOutput || 0, pricedOutputTokens(row))) + '</td>' +
-          '<td>' + esc(formatCharTokenRange(row)) + '</td>' +
           '</tr>'
-        )).join('') +
+        )).join('') + (rows.length ? '' : '<tr><td colspan="12" class="muted">No usage in this period</td></tr>') +
         '</tbody>';
     }
 
@@ -1216,10 +1259,9 @@
       renderDailyRangeControls();
       renderDailyTokenChart(dailyRowsInRange(summary.daily));
       renderCostMix(summary);
-      renderModels(summary);
+      renderModelAnalysis(summary);
       renderProjectSelector(summary);
       renderProjectDailyChart(selectedProjectFromSummary(summary));
-      renderEfficiency(summary);
     }
 
     const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -1419,21 +1461,25 @@
       const mode = event.target?.dataset?.modelDateMode;
       if (!['relative', 'absolute'].includes(mode) || mode === modelDateMode) return;
       modelDateMode = mode;
-      if (cachedSummary) renderModels(cachedSummary);
+      if (cachedSummary) renderModelAnalysis(cachedSummary);
     });
     document.getElementById('model-relative-range').addEventListener('change', event => {
       modelRelativeDays = event.target.value === 'all' ? Infinity : Number(event.target.value);
-      if (cachedSummary) renderModels(cachedSummary);
+      if (cachedSummary) renderModelAnalysis(cachedSummary);
     });
     document.getElementById('model-date-from').addEventListener('change', event => {
       const to = document.getElementById('model-date-to');
       if (to.value && event.target.value > to.value) to.value = event.target.value;
-      if (cachedSummary) renderModels(cachedSummary);
+      if (cachedSummary) renderModelAnalysis(cachedSummary);
     });
     document.getElementById('model-date-to').addEventListener('change', event => {
       const from = document.getElementById('model-date-from');
       if (from.value && event.target.value < from.value) from.value = event.target.value;
-      if (cachedSummary) renderModels(cachedSummary);
+      if (cachedSummary) renderModelAnalysis(cachedSummary);
+    });
+    document.getElementById('efficiency-model-select').addEventListener('change', event => {
+      efficiencyModelKey = event.target.value || null;
+      if (cachedSummary) renderEfficiency(cachedSummary);
     });
     document.getElementById('sync-dashboard').addEventListener('click', () => {
       startSync();
