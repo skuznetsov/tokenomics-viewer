@@ -8,6 +8,10 @@ const os = require("node:os");
 const Path = require("node:path");
 const test = require("node:test");
 const { buildReportFromClickHouse, syncDatabase } = require("../app");
+const {
+  ANALYTICS_DERIVATION_VERSION,
+  PRICING_CATALOG_VERSION,
+} = require("../lib/core/derivation");
 const { createClickHouseBackend } = require("../lib/storage/clickhouse");
 const { defaultOptions } = require("./support/fixtures");
 
@@ -525,6 +529,13 @@ test("ClickHouse report pins one committed generation across every query", async
     assert.equal(request.url.searchParams.get("param_generation"), "pinned-generation");
     assert.doesNotMatch(request.query, /ANY INNER JOIN/);
   }
+  const quantileQuery = mock.requests.find((request) => request.query.includes("outputCharsPerTokenP10"))?.query;
+  assert.ok(quantileQuery);
+  assert.match(quantileQuery, /'total' AS bucket/);
+  assert.match(quantileQuery, /'effort' AS bucket/);
+  assert.equal((quantileQuery.match(/quantileExactIf\(0\.10\)/g) || []).length, 2);
+  assert.equal((quantileQuery.match(/quantileExactIf\(0\.99\)/g) || []).length, 2);
+  assert.doesNotMatch(quantileQuery, /quantileTDigestIf/);
 });
 
 test("ClickHouse legacy header union uses explicit migration-safe column order", async () => {
@@ -584,6 +595,10 @@ test("ClickHouse sync imports JSONL entries from ZIP sources", async () => {
   assert.equal(mock.inserts.usage_events.reduce((sum, insert) => sum + insert.rows, 0), 2);
   assert.equal(mock.visibleRows("usage_events").length, 2);
   assert.equal(mock.visibleRows("sources").some((row) => row.source_path === removedSource), false);
+  const storedSource = mock.visibleRows("sources").find((row) => row.source_path === `${zip}:${Path.basename(jsonl)}`);
+  assert.ok(storedSource);
+  assert.match(storedSource.fingerprint, new RegExp(`analyticsDerivationVersion=${ANALYTICS_DERIVATION_VERSION}`));
+  assert.match(storedSource.fingerprint, new RegExp(`pricingCatalogVersion=${PRICING_CATALOG_VERSION}`));
   const storedSession = JSON.parse(mock.inserts.sessions[0].body.trim());
   assert.equal(storedSession.kind, "zip-entry");
   assert.equal(storedSession.archive_path, zip);

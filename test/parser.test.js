@@ -156,3 +156,43 @@ test("falls back to one clean turn metric when request chars include tool payloa
   assert.equal(report.total.outputCharTokenOutliers, 0);
   assert.equal(report.total.outputCharTokenSamples, 1);
 });
+
+test("skips exact duplicate last_token_usage snapshots within one turn", () => {
+  const report = newReport();
+  const processLine = createLineProcessor(report, defaultOptions(), "codex-last-usage-duplicate-fixture");
+
+  processLine(JSON.stringify({
+    type: "turn_context",
+    timestamp: "2026-07-05T00:00:01.000Z",
+    payload: { turn_id: "019f0000-0000-0000-0000-000000000051", cwd: "/tmp/last-usage-duplicate", model: "gpt-5-codex" },
+  }), 1);
+
+  const duplicate = {
+    type: "event_msg",
+    timestamp: "2026-07-05T00:00:02.000Z",
+    payload: {
+      type: "token_count",
+      info: {
+        last_token_usage: { input_tokens: 100, cached_input_tokens: 20, output_tokens: 10 },
+      },
+    },
+  };
+  processLine(JSON.stringify(duplicate), 2);
+  processLine(JSON.stringify({ ...duplicate, timestamp: "2026-07-05T00:00:03.000Z" }), 3);
+
+  processLine(JSON.stringify({
+    type: "turn_context",
+    timestamp: "2026-07-05T00:01:01.000Z",
+    payload: { turn_id: "019f0000-0000-0000-0000-000000000052", cwd: "/tmp/last-usage-duplicate", model: "gpt-5-codex" },
+  }), 4);
+  processLine(JSON.stringify({
+    ...duplicate,
+    timestamp: "2026-07-05T00:01:02.000Z",
+  }), 5);
+
+  assert.equal(report.sources.tokenCountSnapshots, 3);
+  assert.equal(report.total.requests, 2);
+  assert.equal(report.total.input, 160);
+  assert.equal(report.total.cacheRead, 40);
+  assert.equal(report.total.output, 20);
+});

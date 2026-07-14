@@ -7,6 +7,11 @@ const Path = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
 const test = require("node:test");
 const { buildReport, buildReportFromDatabase, syncDatabase } = require("../app");
+const {
+  ANALYTICS_DERIVATION_VERSION,
+  PRICING_CATALOG_VERSION,
+  sourceFingerprint,
+} = require("../lib/core/derivation");
 const { createSqliteBackend } = require("../lib/storage/sqlite");
 const { defaultOptions } = require("./support/fixtures");
 
@@ -147,6 +152,51 @@ test("syncDatabase imports sources idempotently and replaces changed sessions", 
   const fromDb = buildReportFromDatabase(db, defaultOptions());
   assert.equal(fromDb.total.requests, 1);
   assert.equal(fromDb.total.output, 300_000);
+});
+
+test("SQLite persists versioned fingerprints and reimports a stale derivation", async () => {
+  const tmp = fs.mkdtempSync(Path.join(os.tmpdir(), "tokenomics-sqlite-derivation-version-test-"));
+  const jsonl = Path.join(tmp, "session.jsonl");
+  const db = Path.join(tmp, "tokenomics.sqlite");
+  fs.writeFileSync(jsonl, "{}\n");
+
+  await syncDatabase(defaultOptions({ db, paths: [jsonl] }));
+  const stat = fs.statSync(jsonl);
+  const currentFingerprint = sourceFingerprint({
+    kind: "jsonl",
+    size: stat.size,
+    mtimeMs: stat.mtimeMs,
+  });
+  const stored = new DatabaseSync(db);
+  try {
+    assert.equal(stored.prepare("SELECT fingerprint FROM sources WHERE source_path = ?").get(jsonl).fingerprint, currentFingerprint);
+    assert.match(currentFingerprint, new RegExp(`analyticsDerivationVersion=${ANALYTICS_DERIVATION_VERSION}`));
+    assert.match(currentFingerprint, new RegExp(`pricingCatalogVersion=${PRICING_CATALOG_VERSION}`));
+    assert.equal(stored.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value, "1");
+    stored.prepare("UPDATE sources SET fingerprint = ? WHERE source_path = ?").run(
+      sourceFingerprint({ kind: "jsonl", size: stat.size, mtimeMs: stat.mtimeMs }, {
+        analyticsDerivationVersion: ANALYTICS_DERIVATION_VERSION + 1,
+      }),
+      jsonl,
+    );
+  } finally {
+    stored.close();
+  }
+
+  const progressEvents = [];
+  await syncDatabase(defaultOptions({
+    db,
+    paths: [jsonl],
+    onSyncProgress: (event) => progressEvents.push(event),
+  }));
+  assert.equal(progressEvents.at(-1).changedSources, 1);
+
+  const recovered = new DatabaseSync(db);
+  try {
+    assert.equal(recovered.prepare("SELECT fingerprint FROM sources WHERE source_path = ?").get(jsonl).fingerprint, currentFingerprint);
+  } finally {
+    recovered.close();
+  }
 });
 
 test("SQLite replaces a Codex source when archiving moves the same session", async () => {

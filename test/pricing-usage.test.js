@@ -236,11 +236,11 @@ test("tracks output chars per token at Codex turn granularity", () => {
   }), 9);
 
   assert.equal(report.total.outputCharTokenSamples, 1);
-  assert.equal(report.total.visibleOutputTextChars, 25);
-  assert.equal(report.total.visibleOutputTextTokens, 10);
-  assert.equal(report.total.outputCharsPerTokenMin, 2.5);
-  assert.equal(report.total.outputCharsPerTokenMax, 2.5);
-  assert.equal(report.total.outputCharsPerTokenSum, 2.5);
+  assert.equal(report.total.visibleOutputTextChars, 10);
+  assert.equal(report.total.visibleOutputTextTokens, 6);
+  assert.equal(report.total.outputCharsPerTokenMin, 10 / 6);
+  assert.equal(report.total.outputCharsPerTokenMax, 10 / 6);
+  assert.equal(report.total.outputCharsPerTokenSum, 10 / 6);
   assert.equal(report.total.outputCharTokenOutliers, 0);
 });
 
@@ -282,6 +282,75 @@ test("tracks request-level output chars per token from matching token_count snap
   assert.equal(report.total.outputCharsPerTokenMax, 2);
   assert.equal(report.total.outputCharsPerTokenSum, 2);
   assert.equal(report.total.outputCharTokenOutliers, 0);
+});
+
+test("falls back to agent_message text when response_item text is unavailable", () => {
+  const report = newReport();
+  const processLine = createLineProcessor(report, defaultOptions(), "codex-agent-message-fallback-fixture");
+
+  processLine(JSON.stringify({
+    type: "turn_context",
+    timestamp: "2026-07-05T00:00:01.000Z",
+    payload: { turn_id: "019f0000-0000-7000-8000-000000000031", cwd: "/tmp/project-output-chars", model: "gpt-5-codex", effort: "high" },
+  }), 1);
+  processLine(JSON.stringify({
+    type: "event_msg",
+    timestamp: "2026-07-05T00:00:02.000Z",
+    payload: {
+      type: "token_count",
+      info: { last_token_usage: { input_tokens: 100, cached_input_tokens: 0, output_tokens: 4 } },
+    },
+  }), 2);
+  processLine(JSON.stringify({
+    type: "event_msg",
+    timestamp: "2026-07-05T00:00:03.000Z",
+    payload: { type: "agent_message", message: "abcdefgh" },
+  }), 3);
+  processLine(JSON.stringify({
+    type: "turn_context",
+    timestamp: "2026-07-05T00:01:01.000Z",
+    payload: { turn_id: "019f0000-0000-7000-8000-000000000032", cwd: "/tmp/project-output-chars", model: "gpt-5-codex", effort: "high" },
+  }), 4);
+
+  assert.equal(report.total.outputCharTokenSamples, 1);
+  assert.equal(report.total.visibleOutputTextChars, 8);
+  assert.equal(report.total.visibleOutputTextTokens, 4);
+  assert.equal(report.total.outputCharsPerTokenMin, 2);
+  assert.equal(report.total.outputCharsPerTokenMax, 2);
+  assert.equal(report.total.outputCharsPerTokenSum, 2);
+});
+
+test("does not reintroduce an excluded output chars-per-token request through turn fallback", () => {
+  const report = newReport();
+  const processLine = createLineProcessor(report, defaultOptions(), "codex-output-char-excluded-fixture");
+
+  processLine(JSON.stringify({
+    type: "turn_context",
+    timestamp: "2026-07-05T00:00:01.000Z",
+    payload: { turn_id: "019f0000-0000-7000-8000-000000000041", cwd: "/tmp/project-output-chars", model: "gpt-5-codex", effort: "high" },
+  }), 1);
+  processLine(JSON.stringify({
+    type: "response_item",
+    timestamp: "2026-07-05T00:00:02.000Z",
+    payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "x".repeat(11) }] },
+  }), 2);
+  processLine(JSON.stringify({
+    type: "event_msg",
+    timestamp: "2026-07-05T00:00:03.000Z",
+    payload: {
+      type: "token_count",
+      info: { last_token_usage: { input_tokens: 100, cached_input_tokens: 0, output_tokens: 1 } },
+    },
+  }), 3);
+  processLine(JSON.stringify({
+    type: "turn_context",
+    timestamp: "2026-07-05T00:01:01.000Z",
+    payload: { turn_id: "019f0000-0000-7000-8000-000000000042", cwd: "/tmp/project-output-chars", model: "gpt-5-codex", effort: "high" },
+  }), 4);
+
+  assert.equal(report.total.outputCharTokenSamples, 0);
+  assert.equal(report.total.outputCharTokenOutliers, 0);
+  assert.equal(report._outputCharMetrics.length, 0);
 });
 
 test("tracks priced token denominators separately from unpriced usage", () => {
@@ -671,9 +740,9 @@ test("treats Codex total counter decreases as a fresh sequence", () => {
   assert.equal(report.sources.tokenCountSnapshots, 3);
   assert.equal(report.sources.skippedTokenCountSnapshots, 0);
   assert.equal(report.total.requests, 3);
-  assert.equal(report.total.input, 140_000);
-  assert.equal(report.total.cacheRead, 1_110_000);
-  assert.equal(report.total.output, 13_000);
+  assert.equal(report.total.input, 130_000);
+  assert.equal(report.total.cacheRead, 1_020_000);
+  assert.equal(report.total.output, 12_000);
 });
 
 test("OpenAI auto pricing changes variant only above the 272k threshold", () => {
@@ -755,18 +824,30 @@ test("normalizeUsage canonicalizes aliases and clamps negative derived input", (
   assert.equal(usage.normalizeUsage({ input: 10, cacheRead: 4, inputIncludesCacheRead: false }).input, 10);
 });
 
-test("cumulative usage resets expose sequenceReset and clear the baseline", () => {
+test("cumulative usage resets expose sequenceReset and establish a new baseline", () => {
   const first = usage.usageFromCodexInfo({
     total_token_usage: { input_tokens: 100, output_tokens: 4 },
   });
   const reset = usage.usageFromCodexInfo({
     total_token_usage: { input_tokens: 10, output_tokens: 1 },
   }, first.totalUsage);
+  const following = usage.usageFromCodexInfo({
+    total_token_usage: { input_tokens: 15, output_tokens: 3 },
+  }, reset.totalUsage);
 
   assert.equal(reset.usage.sequenceReset, true);
-  assert.equal(reset.totalUsage, null);
+  assert.equal(reset.totalUsage.inputCounter, 10);
   assert.equal(reset.usage.inputCounter, 10);
   assert.equal(reset.usage.output, 1);
+  assert.deepEqual({
+    input: following.usage.input,
+    inputCounter: following.usage.inputCounter,
+    output: following.usage.output,
+  }, {
+    input: 5,
+    inputCounter: 5,
+    output: 2,
+  });
 });
 
 test("date and ISO week keys honor their calendar boundaries", () => {
