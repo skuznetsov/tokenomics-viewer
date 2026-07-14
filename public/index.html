@@ -10,7 +10,7 @@
     * { box-sizing: border-box; }
     html { scroll-behavior:smooth; }
     body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; overflow-x:hidden; }
-    button, select { font:inherit; }
+    button, select, input { font:inherit; }
     .app-header { position:sticky; top:0; z-index:5; background:color-mix(in srgb, var(--panel) 96%, transparent); border-bottom:1px solid var(--line); backdrop-filter:blur(12px); }
     .brand-row { min-height:50px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:8px 20px; }
     .brand-group, .header-actions, .sync-state { display:flex; align-items:center; gap:10px; }
@@ -27,7 +27,7 @@
     h1 { margin:0; font-size:18px; letter-spacing:0; }
     .action-button { min-height:32px; border:1px solid var(--line); border-radius:6px; padding:5px 10px; color:var(--fg); background:var(--panel); cursor:pointer; }
     .action-button:hover { border-color:var(--axis); background:var(--soft); }
-    .action-button:focus-visible, .seg-button:focus-visible, .nav-button:focus-visible, select:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    .action-button:focus-visible, .seg-button:focus-visible, .nav-button:focus-visible, select:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
     .action-button:disabled { cursor:not-allowed; color:var(--muted); }
     .section-nav { display:flex; gap:24px; min-height:38px; padding:0 20px; overflow:auto; }
     .nav-button { position:relative; border:0; background:transparent; color:var(--muted); padding:8px 0 9px; cursor:pointer; white-space:nowrap; }
@@ -56,13 +56,24 @@
     .mix-canvas { width:100%; height:390px; display:block; cursor:crosshair; touch-action:none; }
     .compact-canvas { height:330px; }
     .range-row { display:flex; justify-content:flex-end; margin-top:-4px; }
-    .model-ranking { min-height:330px; }
+    .model-ranking { min-height:250px; }
     .model-table { width:100%; border-collapse:collapse; table-layout:fixed; }
     .model-table th, .model-table td { padding:7px 6px; }
     .model-table th:first-child, .model-table td:first-child { width:38%; }
     .model-table .model-name { overflow:hidden; text-overflow:ellipsis; }
     .rank-bar-track { height:6px; background:var(--soft); }
     .rank-bar { display:block; height:100%; background:var(--axis); }
+    .date-controls { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:8px; }
+    .date-control-group { display:flex; align-items:center; gap:6px; }
+    .date-input { min-height:32px; border:1px solid var(--line); border-radius:6px; padding:5px 7px; color:var(--fg); background:var(--panel); }
+    .date-label { display:flex; align-items:center; gap:5px; color:var(--muted); font-size:12px; }
+    .model-detail-table { width:100%; border-collapse:collapse; min-width:1120px; }
+    .model-detail-table th:first-child, .model-detail-table td:first-child { text-align:left; }
+    .model-detail-table tfoot td { border-top:2px solid var(--line); font-weight:650; }
+    .model-provider { display:block; color:var(--muted); font-size:11px; font-weight:400; }
+    .metric-cell { display:grid; justify-items:end; gap:1px; }
+    .metric-cell strong { color:var(--fg); font-weight:650; }
+    .metric-cell span { color:var(--muted); font-size:11px; }
     .is-hidden { display:none !important; }
     #efficiency-table { width:100%; border-collapse:collapse; min-width:920px; }
     th, td { padding:8px 10px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }
@@ -87,11 +98,11 @@
     .recommendation-action { color:var(--fg); }
     .recommendation-meta, .recommendation-caveat { color:var(--muted); font-size:12px; }
     body[data-dashboard-mode="overview"] .analyst-only { display:none !important; }
+    body[data-dashboard-mode="analyst"] .overview-only { display:none !important; }
     body[data-dashboard-mode="overview"] .analysis-grid { grid-template-columns:1fr; }
     @media (max-width: 1180px) { .cards { grid-template-columns:repeat(3, minmax(0, 1fr)); } .card:nth-child(3) { border-right:0; } .card:nth-child(n+4) { border-top:1px solid var(--line); } .analysis-grid { grid-template-columns:1fr; } }
-    @media (max-width: 760px) { .cards { grid-template-columns:repeat(2, minmax(0, 1fr)); } .card, .card:nth-child(3) { border-right:1px solid var(--line); border-top:1px solid var(--line); } .card:nth-child(-n+2) { border-top:0; } .card:nth-child(2n) { border-right:0; } .card:last-child { grid-column:1 / -1; border-right:0; } .panel-head { display:grid; } .hover-legend { justify-content:flex-start; } .recommendation-list { grid-template-columns:1fr; } .recommendation-item:nth-child(odd) { border-right:0; } }
-    @media (max-width: 560px) { .brand-row { align-items:flex-start; } .brand-group { align-items:flex-start; flex-direction:column; gap:3px; } .sync-state { max-width:110px; } .section-nav { gap:18px; } main { padding:12px; } .cards { grid-template-columns:1fr; } .card, .card:nth-child(3), .card:nth-child(2n) { border-right:0; border-top:1px solid var(--line); } .card:first-child { border-top:0; } .card:last-child { grid-column:auto; } .token-card .value { white-space:normal; } .chart-wrap, .compact-chart-wrap, .project-chart-wrap { min-height:330px; } .mix-canvas { height:330px; } .range-row { justify-content:flex-start; overflow:auto; } }
-    @media (max-width: 360px) { .brand-row { flex-wrap:wrap; } .header-actions { width:100%; justify-content:space-between; } }
+    @media (max-width: 760px) { .cards { grid-template-columns:repeat(2, minmax(0, 1fr)); } .card, .card:nth-child(3) { border-right:1px solid var(--line); border-top:1px solid var(--line); } .card:nth-child(-n+2) { border-top:0; } .card:nth-child(2n) { border-right:0; } .card:last-child { grid-column:1 / -1; border-right:0; } .panel-head { display:grid; } .hover-legend { justify-content:flex-start; } .date-controls { justify-content:flex-start; } .recommendation-list { grid-template-columns:1fr; } .recommendation-item:nth-child(odd) { border-right:0; } }
+    @media (max-width: 560px) { .brand-row { align-items:flex-start; flex-wrap:wrap; } .brand-group { align-items:flex-start; flex-direction:column; gap:3px; } .header-actions { width:100%; justify-content:space-between; } .sync-state { max-width:240px; } .section-nav { gap:18px; } main { padding:12px; } .cards { grid-template-columns:1fr; } .card, .card:nth-child(3), .card:nth-child(2n) { border-right:0; border-top:1px solid var(--line); } .card:first-child { border-top:0; } .card:last-child { grid-column:auto; } .token-card .value { white-space:normal; } .chart-wrap, .compact-chart-wrap, .project-chart-wrap { min-height:330px; } .mix-canvas { height:330px; } .range-row { justify-content:flex-start; overflow:auto; } }
   </style>
 </head>
 <body data-dashboard-mode="overview">
@@ -141,21 +152,19 @@
       </div>
     </section>
     <div class="analysis-grid">
-      <section id="models-section">
+      <section id="cost-mix-section">
         <div class="panel-head">
           <div class="panel-title-stack">
-            <h2 id="cost-mix-title">Cost by Model</h2>
+            <h2>Cost Mix</h2>
             <div class="hover-legend" id="cost-mix-hover-legend"></div>
           </div>
           <div class="segmented" id="cost-mix-controls" aria-label="Cost mix period">
             <button class="seg-button" type="button" data-mix-mode="daily">Daily</button>
             <button class="seg-button" type="button" data-mix-mode="weekly">Weekly</button>
             <button class="seg-button" type="button" data-mix-mode="monthly">Monthly</button>
-            <button class="seg-button" type="button" data-mix-mode="models">Models</button>
           </div>
         </div>
-        <div class="model-ranking" id="model-ranking"></div>
-        <div class="compact-chart-wrap is-hidden" id="cost-chart-wrap"><canvas class="mix-canvas compact-canvas" id="cost-mix-canvas" role="img" aria-label="Cost mix by selected period"></canvas></div>
+        <div class="compact-chart-wrap" id="cost-chart-wrap"><canvas class="mix-canvas compact-canvas" id="cost-mix-canvas" role="img" aria-label="Cost mix by selected period"></canvas></div>
       </section>
       <section class="analyst-only" id="projects-section">
         <div class="panel-head">
@@ -168,6 +177,33 @@
         <div class="project-chart-wrap"><canvas class="mix-canvas compact-canvas" id="project-cost-canvas" role="img" aria-label="Daily project cost with input, cache, and output cost mix"></canvas></div>
       </section>
     </div>
+    <section id="models-section">
+      <div class="panel-head">
+        <div class="panel-title-stack">
+          <h2>Models</h2>
+          <div class="muted" id="models-summary"></div>
+        </div>
+        <div class="date-controls">
+          <div class="segmented" id="model-date-mode-controls" aria-label="Model date mode">
+            <button class="seg-button active" type="button" data-model-date-mode="relative" aria-pressed="true">Relative</button>
+            <button class="seg-button" type="button" data-model-date-mode="absolute" aria-pressed="false">Absolute</button>
+          </div>
+          <select class="date-input" id="model-relative-range" aria-label="Model relative date range">
+            <option value="30">1M</option>
+            <option value="90">3M</option>
+            <option value="180">6M</option>
+            <option value="365">1Y</option>
+            <option value="all" selected>All</option>
+          </select>
+          <div class="date-control-group is-hidden" id="model-absolute-range">
+            <label class="date-label">From <input class="date-input" id="model-date-from" type="date"></label>
+            <label class="date-label">To <input class="date-input" id="model-date-to" type="date"></label>
+          </div>
+        </div>
+      </div>
+      <div class="model-ranking overview-only" id="model-ranking"></div>
+      <div class="table-scroll analyst-only"><table class="model-detail-table" id="models-table"></table></div>
+    </section>
     <section class="analyst-only" id="efficiency-section">
       <div class="panel-head">
         <h2>Efficiency</h2>
@@ -750,7 +786,7 @@
         emptyText: 'No daily token data',
         yLabel: 'tokens/day (log)',
         value: row => totalTokens(row),
-        valueText: row => formatTokenCount(totalTokens(row)) + ' tokens',
+        valueText: row => formatTokenCount(totalTokens(row)) + ' tokens · ' + formatUsdCompact(row.costUsd || 0),
         axisText: value => formatTokenCount(value),
         scale: tokenScale,
         mix: tokenMix,
@@ -841,8 +877,10 @@
     }
 
     let cachedSummary = null;
-    let costMixMode = 'models';
+    let costMixMode = 'daily';
     let dailyRangeDays = 90;
+    let modelDateMode = 'relative';
+    let modelRelativeDays = Infinity;
     const overviewModelLimit = 10;
     let dashboardMode = storedDashboardMode();
 
@@ -870,6 +908,7 @@
       if (cachedSummary) {
         renderRecommendations(cachedSummary);
         renderCostMix(cachedSummary);
+        renderModels(cachedSummary);
         requestAnimationFrame(() => {
           renderDailyTokenChart(dailyRowsInRange(cachedSummary.daily));
           if (dashboardMode === 'analyst') renderProjectDailyChart(selectedProjectFromSummary(cachedSummary));
@@ -894,7 +933,7 @@
     }
 
     function costMixRows(summary) {
-      const source = costMixMode === 'models' ? summary.topModels : (summary[costMixMode] || []);
+      const source = summary[costMixMode] || [];
       return [...source].sort((a, b) => (b.costUsd || 0) - (a.costUsd || 0)).slice(0, 15);
     }
 
@@ -904,20 +943,132 @@
       });
     }
 
-    function renderModelRanking(summary) {
+    function emptyPeriodStats() {
+      return {
+        requests: 0,
+        input: 0,
+        cacheCreate5m: 0,
+        cacheCreate30m: 0,
+        cacheCreate1h: 0,
+        cacheRead: 0,
+        output: 0,
+        costUsd: 0,
+        costsUsd: { input: 0, cacheCreate5m: 0, cacheCreate30m: 0, cacheCreate1h: 0, cacheRead: 0, output: 0 },
+      };
+    }
+
+    function addPeriodStats(target, row = {}) {
+      for (const key of ['requests', 'input', 'cacheCreate5m', 'cacheCreate30m', 'cacheCreate1h', 'cacheRead', 'output', 'costUsd']) {
+        target[key] += row[key] || 0;
+      }
+      for (const key of ['input', 'cacheCreate5m', 'cacheCreate30m', 'cacheCreate1h', 'cacheRead', 'output']) {
+        target.costsUsd[key] += row.costsUsd?.[key] || 0;
+      }
+      return target;
+    }
+
+    function sumPeriodStats(rows) {
+      return (rows || []).reduce(addPeriodStats, emptyPeriodStats());
+    }
+
+    function modelDateBounds(summary) {
+      const days = (summary.providerModelEffortDaily || [])
+        .flatMap(group => group.daily || [])
+        .map(row => row.name)
+        .filter(name => /^\d{4}-\d{2}-\d{2}$/.test(name))
+        .sort();
+      return days.length ? { min: days[0], max: days.at(-1) } : { min: null, max: null };
+    }
+
+    function configureModelDateInputs(summary) {
+      const bounds = modelDateBounds(summary);
+      const from = document.getElementById('model-date-from');
+      const to = document.getElementById('model-date-to');
+      for (const input of [from, to]) {
+        input.min = bounds.min || '';
+        input.max = bounds.max || '';
+        input.disabled = !bounds.min;
+      }
+      if (bounds.min && !from.value) from.value = bounds.min;
+      if (bounds.max && !to.value) to.value = bounds.max;
+      return bounds;
+    }
+
+    function selectedModelDateRange(summary) {
+      const bounds = configureModelDateInputs(summary);
+      if (!bounds.min) return { from: null, to: null, includeUnknown: modelRelativeDays === Infinity };
+      if (modelDateMode === 'absolute') {
+        const from = document.getElementById('model-date-from').value || bounds.min;
+        const to = document.getElementById('model-date-to').value || bounds.max;
+        return { from: from <= to ? from : to, to: from <= to ? to : from, includeUnknown: false };
+      }
+      if (!Number.isFinite(modelRelativeDays)) return { from: bounds.min, to: bounds.max, includeUnknown: true };
+      const lastTime = Date.parse(bounds.max + 'T00:00:00Z');
+      const from = new Date(lastTime - (modelRelativeDays - 1) * 86_400_000).toISOString().slice(0, 10);
+      return { from, to: bounds.max, includeUnknown: false };
+    }
+
+    function modelDayInRange(name, range) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(name)) return range.includeUnknown;
+      return (!range.from || name >= range.from) && (!range.to || name <= range.to);
+    }
+
+    function modelEffortRowsInRange(summary) {
+      const range = selectedModelDateRange(summary);
+      const rows = (summary.providerModelEffortDaily || []).map(group => ({
+        provider: group.provider,
+        model: group.model,
+        effort: group.effort,
+        ...sumPeriodStats((group.daily || []).filter(row => modelDayInRange(row.name, range))),
+      })).filter(row => row.requests > 0 || totalTokens(row) > 0 || row.costUsd > 0);
+      rows.sort((a, b) => (b.costUsd || 0) - (a.costUsd || 0) || totalTokens(b) - totalTokens(a) || a.model.localeCompare(b.model));
+      return { range, rows };
+    }
+
+    function collapseModelRows(rows) {
+      const grouped = new Map();
+      for (const row of rows) {
+        const key = row.provider + '\u0000' + row.model;
+        const target = grouped.get(key) || { provider: row.provider, model: row.model, ...emptyPeriodStats() };
+        addPeriodStats(target, row);
+        grouped.set(key, target);
+      }
+      return [...grouped.values()].sort((a, b) => (b.costUsd || 0) - (a.costUsd || 0) || a.model.localeCompare(b.model));
+    }
+
+    function effortLabel(row) {
+      if (row.effort && row.effort !== '<unknown>') return row.effort;
+      return row.provider === 'openai' ? 'Unknown' : 'n/a';
+    }
+
+    function formatModelPeriod(range) {
+      if (!range.from && !range.to) return 'No dated usage';
+      if (range.includeUnknown && modelDateMode === 'relative' && !Number.isFinite(modelRelativeDays)) return 'All time';
+      return range.from === range.to ? range.from : range.from + ' to ' + range.to;
+    }
+
+    function renderModelDateControls(summary) {
+      document.querySelectorAll('#model-date-mode-controls [data-model-date-mode]').forEach(button => {
+        const active = button.dataset.modelDateMode === modelDateMode;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+      document.getElementById('model-relative-range').classList.toggle('is-hidden', modelDateMode !== 'relative');
+      document.getElementById('model-absolute-range').classList.toggle('is-hidden', modelDateMode !== 'absolute');
+      configureModelDateInputs(summary);
+    }
+
+    function renderModelRanking(rows, totalStats) {
       const container = document.getElementById('model-ranking');
-      const allRows = [...(summary.models || summary.topModels || [])].sort((a, b) => (b.costUsd || 0) - (a.costUsd || 0));
-      const rows = dashboardMode === 'overview' ? allRows.slice(0, overviewModelLimit) : allRows;
-      const maxCost = Math.max(1, ...rows.map(row => row.costUsd || 0));
-      const totalCost = Math.max(1, summary.total?.costUsd || 0);
-      document.getElementById('cost-mix-hover-legend').innerHTML =
-        '<span class="muted">' + esc(formatTokenCount(rows.length)) + ' of ' + esc(formatTokenCount(allRows.length)) + ' models · ' + esc(formatUsdCompact(rows.reduce((sum, row) => sum + (row.costUsd || 0), 0))) + '</span>';
+      const visibleRows = rows.slice(0, overviewModelLimit);
+      const maxCost = Math.max(1, ...visibleRows.map(row => row.costUsd || 0));
+      const totalCost = Math.max(1, totalStats.costUsd || 0);
       container.innerHTML = '<table class="model-table"><thead><tr><th>Model</th><th>Cost</th><th>Share</th><th></th></tr></thead><tbody>' +
-        rows.map(row => {
+        visibleRows.map(row => {
           const share = (row.costUsd || 0) / totalCost;
           const width = ((row.costUsd || 0) / maxCost) * 100;
           return '<tr>' +
-            '<td class="model-name" title="' + esc(row.name) + '">' + esc(row.name) + '</td>' +
+            '<td class="model-name" title="' + esc(row.provider + '/' + row.model) + '">' + esc(row.model) + '<span class="model-provider">' + esc(row.provider) + '</span></td>' +
             '<td>' + esc(formatUsdCompact(row.costUsd || 0)) + '</td>' +
             '<td>' + esc(formatPct(share)) + '</td>' +
             '<td><div class="rank-bar-track"><span class="rank-bar" style="width:' + width.toFixed(1) + '%"></span></div></td>' +
@@ -925,21 +1076,41 @@
         }).join('') + '</tbody></table>';
     }
 
+    function modelMetricCell(row, key) {
+      const mix = costMix(row);
+      return '<span class="metric-cell"><strong>' + esc(formatTokenCount(segmentTokens(row, key))) + ' tokens</strong>' +
+        '<span>' + esc(formatUsdCompact(segmentCost(row, key))) + ' · ' + esc(formatPct(mix[key + 'Pct'] || 0)) + '</span></span>';
+    }
+
+    function modelTableRow(row, totalCost, total = false) {
+      return '<tr>' +
+        '<td title="' + esc(row.provider + '/' + row.model) + '">' + esc(row.model) + (total ? '' : '<span class="model-provider">' + esc(row.provider) + '</span>') + '</td>' +
+        '<td>' + (total ? '' : esc(effortLabel(row))) + '</td>' +
+        '<td>' + esc(formatTokenCount(row.requests || 0)) + '</td>' +
+        '<td>' + esc(formatUsdCompact(row.costUsd || 0)) + '</td>' +
+        '<td>' + esc(formatPct(total ? 1 : (totalCost > 0 ? (row.costUsd || 0) / totalCost : 0))) + '</td>' +
+        '<td>' + modelMetricCell(row, 'input') + '</td>' +
+        '<td>' + modelMetricCell(row, 'cache') + '</td>' +
+        '<td>' + modelMetricCell(row, 'output') + '</td>' +
+        '</tr>';
+    }
+
+    function renderModels(summary) {
+      renderModelDateControls(summary);
+      const { range, rows } = modelEffortRowsInRange(summary);
+      const totalStats = sumPeriodStats(rows);
+      const models = collapseModelRows(rows);
+      document.getElementById('models-summary').textContent =
+        formatModelPeriod(range) + ' · ' + models.length + ' models · ' + rows.length + ' model/effort rows · ' + formatUsdCompact(totalStats.costUsd || 0);
+      renderModelRanking(models, totalStats);
+      const table = document.getElementById('models-table');
+      table.innerHTML = '<thead><tr><th>Model</th><th>Effort</th><th>Requests</th><th>Cost</th><th>Share</th><th>Input</th><th>Cache</th><th>Output</th></tr></thead>' +
+        '<tbody>' + (rows.length ? rows.map(row => modelTableRow(row, totalStats.costUsd || 0)).join('') : '<tr><td colspan="8" class="muted">No usage in this period</td></tr>') + '</tbody>' +
+        (rows.length ? '<tfoot>' + modelTableRow({ provider: '', model: 'Total', effort: '', ...totalStats }, totalStats.costUsd || 0, true) + '</tfoot>' : '');
+    }
+
     function renderCostMix(summary) {
       renderCostMixControls();
-      const ranking = document.getElementById('model-ranking');
-      const chartWrap = document.getElementById('cost-chart-wrap');
-      const title = document.getElementById('cost-mix-title');
-      if (costMixMode === 'models') {
-        title.textContent = 'Cost by Model';
-        ranking.classList.remove('is-hidden');
-        chartWrap.classList.add('is-hidden');
-        renderModelRanking(summary);
-        return;
-      }
-      title.textContent = 'Cost Mix';
-      ranking.classList.add('is-hidden');
-      chartWrap.classList.remove('is-hidden');
       const rows = costMixRows(summary);
       renderSharedMixChart(costChart, rows, {
         key: 'cost-' + costMixMode,
@@ -1045,6 +1216,7 @@
       renderDailyRangeControls();
       renderDailyTokenChart(dailyRowsInRange(summary.daily));
       renderCostMix(summary);
+      renderModels(summary);
       renderProjectSelector(summary);
       renderProjectDailyChart(selectedProjectFromSummary(summary));
       renderEfficiency(summary);
@@ -1242,6 +1414,26 @@
         renderDailyRangeControls();
         renderDailyTokenChart(dailyRowsInRange(cachedSummary.daily));
       }
+    });
+    document.getElementById('model-date-mode-controls').addEventListener('click', event => {
+      const mode = event.target?.dataset?.modelDateMode;
+      if (!['relative', 'absolute'].includes(mode) || mode === modelDateMode) return;
+      modelDateMode = mode;
+      if (cachedSummary) renderModels(cachedSummary);
+    });
+    document.getElementById('model-relative-range').addEventListener('change', event => {
+      modelRelativeDays = event.target.value === 'all' ? Infinity : Number(event.target.value);
+      if (cachedSummary) renderModels(cachedSummary);
+    });
+    document.getElementById('model-date-from').addEventListener('change', event => {
+      const to = document.getElementById('model-date-to');
+      if (to.value && event.target.value > to.value) to.value = event.target.value;
+      if (cachedSummary) renderModels(cachedSummary);
+    });
+    document.getElementById('model-date-to').addEventListener('change', event => {
+      const from = document.getElementById('model-date-from');
+      if (from.value && event.target.value < from.value) from.value = event.target.value;
+      if (cachedSummary) renderModels(cachedSummary);
     });
     document.getElementById('sync-dashboard').addEventListener('click', () => {
       startSync();

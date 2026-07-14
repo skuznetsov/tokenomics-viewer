@@ -364,6 +364,7 @@ test("SQLite round-trip preserves raw report key totals", async () => {
   assert.deepEqual(stored.rateLimits, raw.rateLimits);
   assert.deepEqual(Object.keys(stored.models), Object.keys(raw.models));
   assert.deepEqual(Object.keys(stored.projects), Object.keys(raw.projects));
+  assert.deepEqual(stored.providerModelEffortDaily, raw.providerModelEffortDaily);
 });
 
 test("changed source replacement removes dependent SQLite rows", async () => {

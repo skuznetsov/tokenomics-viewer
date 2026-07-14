@@ -334,6 +334,9 @@ test("ClickHouse sync streams usage rows in bounded insert chunks", async () => 
     const alter = queries.find((query) => query.trim().startsWith("ALTER TABLE usage_events"));
     assert.ok(alter, "long ALTER TABLE SQL should be observed from the request body");
     assert.match(alter, /ADD COLUMN IF NOT EXISTS visible_chars_per_token/);
+    const usageStatsQuery = queries.find((query) => query.includes("FROM usage_events") && query.includes("UNION ALL"));
+    assert.match(usageStatsQuery, /'providerModelEffortDaily' AS bucket/);
+    assert.match(usageStatsQuery, /GROUP BY provider, model, effort, date_key/);
     assert.equal(mock.inserts.usage_events.reduce((sum, insert) => sum + insert.rows, 0), rows);
     assert.ok(mock.inserts.usage_events.length > 1);
     assert.ok(mock.inserts.usage_events.every((insert) => insert.rows <= 100_000));

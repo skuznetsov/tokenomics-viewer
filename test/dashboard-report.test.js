@@ -17,6 +17,43 @@ test("dashboard summary keeps daily buckets chronological for time-series charts
   assert.deepEqual(summary.daily.map((row) => row.name), ["2026-01-01", "2026-01-02", "2026-01-03"]);
 });
 
+test("dashboard summary exposes chronological provider, model, and effort daily groups", () => {
+  const report = newReport();
+  report.providerModelEffortDaily = {
+    openai: {
+      "gpt-5.5": {
+        high: {
+          "2026-01-03": statsFixture({ input: 30, cacheRead: 5, output: 3, costUsd: 3 }),
+          "2026-01-01": statsFixture({ input: 10, cacheRead: 2, output: 1, costUsd: 1 }),
+        },
+      },
+    },
+    anthropic: {
+      "gpt-5.5": {
+        "<unknown>": {
+          "2026-01-02": statsFixture({ input: 4, cacheRead: 3, output: 2, costUsd: 1 }),
+        },
+      },
+    },
+  };
+
+  const summary = webSummary(report, defaultOptions());
+
+  assert.ok(Array.isArray(summary.providerModelEffortDaily));
+  assert.equal(summary.providerModelEffortDaily.length, 2, "providers with the same model name must stay separate");
+  const openai = summary.providerModelEffortDaily.find((group) => group.provider === "openai");
+  assert.deepEqual(openai.daily.map((row) => row.name), ["2026-01-01", "2026-01-03"]);
+  assert.deepEqual(
+    Object.fromEntries(["provider", "model", "effort"].map((key) => [key, openai[key]])),
+    { provider: "openai", model: "gpt-5.5", effort: "high" },
+  );
+  assert.deepEqual(
+    Object.fromEntries(["input", "cacheRead", "output", "costUsd"].map((key) => [key, openai.daily[0][key]])),
+    { input: 10, cacheRead: 2, output: 1, costUsd: 1 },
+  );
+  assert.equal(Object.hasOwn(openai.daily[0], "outputCharsPerTokenSum"), false, "date-filter payload should stay usage-only");
+});
+
 test("dashboard summary exposes per-project daily buckets for the project selector", () => {
   const report = newReport();
   report.projects["/tmp/project-a"] = statsFixture({ costUsd: 5 });
@@ -93,9 +130,39 @@ test("dashboard html replaces sessions with a zoomable project canvas", () => {
   assert.match(html, /data-mix-mode="daily"/);
   assert.match(html, /data-mix-mode="weekly"/);
   assert.match(html, /data-mix-mode="monthly"/);
-  assert.match(html, /data-mix-mode="models"/);
+  const costMixControls = html.slice(html.indexOf('id="cost-mix-controls"'), html.indexOf('</section>', html.indexOf('id="cost-mix-controls"')));
+  const costMixRenderer = html.slice(html.indexOf("function renderCostMix"), html.indexOf("function renderEfficiency"));
+  assert.doesNotMatch(costMixControls, /data-mix-mode="models"/);
+  assert.doesNotMatch(costMixRenderer, /costMixMode === 'models'/);
   assert.doesNotMatch(html, /<h2>Sessions<\/h2>/);
   assert.doesNotMatch(html, /fetch\('\/api\/sessions'\)/);
+});
+
+test("dashboard html exposes a standalone models table and relative and absolute date filters", () => {
+  const html = dashboardHtml();
+
+  assert.ok(html.includes('<section id="models-section">'));
+  assert.ok(html.includes('id="models-table"'), "expected a standalone models table");
+  assert.match(html, /id="model-date-mode-controls"/);
+  assert.match(html, /data-model-date-mode="relative"/);
+  assert.match(html, /data-model-date-mode="absolute"/);
+  assert.match(html, /id="model-relative-range"/);
+  assert.match(html, /<th>Effort<\/th>/);
+  assert.match(html, /<th>Input<\/th>/);
+  assert.match(html, /<th>Cache<\/th>/);
+  assert.match(html, /<th>Output<\/th>/);
+
+  assert.match(html, /id="daily-range-controls"[\s\S]*data-range-days="all"/);
+  const dateInputs = html.match(/<input\b[^>]*type=["']date["'][^>]*>/g) || [];
+  assert.ok(dateInputs.length >= 2, "expected absolute start and end date controls");
+});
+
+test("Daily Token Flow value text includes total tokens and total USD cost", () => {
+  const html = dashboardHtml();
+  const chartSource = html.slice(html.indexOf("function renderDailyTokenChart"), html.indexOf("function bindSharedMixCanvas"));
+
+  assert.match(chartSource, /valueText: row =>[\s\S]*formatTokenCount\(totalTokens\(row\)\)/);
+  assert.match(chartSource, /valueText: row =>[\s\S]*formatUsdCompact\(row\.costUsd \|\| 0\)/);
 });
 
 test("dashboard html exposes the operational overview layout", () => {

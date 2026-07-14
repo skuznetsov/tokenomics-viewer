@@ -102,6 +102,9 @@ test("aggregates Codex token_count by turn_context model and OpenAI cached input
   assert.equal(report.efforts.high.requests, 1);
   assert.equal(report.efforts.high.reasoningOutput, 50_000);
   assert.equal(report.modelEfforts["gpt-5.5"].high.reasoningCostUsd, 1.5);
+  const localDay = reportModel.dateKey(new Date("2026-07-05T00:00:02.000Z"));
+  assert.equal(report.providerModelEffortDaily.openai["gpt-5.5"].high[localDay].requests, 1);
+  assert.equal(report.providerModelEffortDaily.openai["gpt-5.5"].high[localDay].cacheRead, 100_000);
   assert.equal(Number(report.total.costUsd.toFixed(6)), 10.55);
   assert.deepEqual(roundCosts(report.total.costsUsd), {
     input: 4.5,
