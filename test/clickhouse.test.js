@@ -7,7 +7,7 @@ const http = require("node:http");
 const os = require("node:os");
 const Path = require("node:path");
 const test = require("node:test");
-const { buildReportFromClickHouse, syncDatabase } = require("../app");
+const { buildReportFromClickHouse, loadConfiguration, saveConfiguration, syncDatabase } = require("../app");
 const {
   ANALYTICS_DERIVATION_VERSION,
   PRICING_CATALOG_VERSION,
@@ -61,6 +61,13 @@ function createClickHouseServer({ failureStatus = null, failureBody = "", failur
     return [...(activeRows.import_generations || [])].sort((a, b) => (
       Number(b.committed_at_ms) - Number(a.committed_at_ms)
       || String(b.generation_id).localeCompare(String(a.generation_id))
+    ))[0] || null;
+  }
+
+  function latestConfiguration() {
+    return [...(activeRows.configuration_revisions || [])].sort((a, b) => (
+      Number(b.committed_at_ms) - Number(a.committed_at_ms)
+      || String(b.revision).localeCompare(String(a.revision))
     ))[0] || null;
   }
 
@@ -159,6 +166,29 @@ function createClickHouseServer({ failureStatus = null, failureBody = "", failur
         return;
       }
 
+      if (query.includes("FROM configuration_revisions") && query.includes("committed_at_ms")) {
+        const revision = latestConfiguration();
+        response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+        response.end(revision ? `${JSON.stringify(revision)}\n` : "");
+        return;
+      }
+
+      if (query.includes("FROM analytics_settings") && query.includes("value_json")) {
+        const revision = url.searchParams.get("param_revision");
+        const rows = (activeRows.analytics_settings || []).filter((row) => row.revision === revision);
+        response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+        response.end(rows.map((row) => JSON.stringify(row)).join("\n") + (rows.length ? "\n" : ""));
+        return;
+      }
+
+      if (query.includes("FROM pricing_catalog") && query.includes("ORDER BY provider")) {
+        const revision = url.searchParams.get("param_revision");
+        const rows = (activeRows.pricing_catalog || []).filter((row) => row.revision === revision);
+        response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+        response.end(rows.map((row) => JSON.stringify(row)).join("\n") + (rows.length ? "\n" : ""));
+        return;
+      }
+
       if (query.includes("FROM import_generation_sources") && query.includes("source.fingerprint")) {
         const generationId = url.searchParams.get("param_generation");
         const rows = visibleRows("sources", generationId).map((row) => ({
@@ -246,7 +276,30 @@ async function withServer(mock, callback) {
 test("ClickHouse backend exposes an independent factory", () => {
   const backend = createClickHouseBackend();
   assert.equal(typeof backend.buildReportFromClickHouse, "function");
+  assert.equal(typeof backend.loadConfiguration, "function");
+  assert.equal(typeof backend.saveConfiguration, "function");
   assert.equal(typeof backend.syncClickHouseDatabase, "function");
+});
+
+test("ClickHouse configuration revisions publish marker-last and reject stale writers", async () => {
+  const mock = createClickHouseServer();
+  await withServer(mock, async (clickhouseUrl) => {
+    const options = defaultOptions({ dbEngine: "clickhouse", clickhouseUrl, clickhouseDatabase: "tokenomics_test" });
+    const initial = await loadConfiguration(options);
+    const edited = structuredClone(initial);
+    edited.settings.regionalMultiplier = 1.1;
+    const saved = await saveConfiguration(options, edited);
+
+    assert.notEqual(saved.revision, initial.revision);
+    assert.equal((await loadConfiguration(options)).settings.regionalMultiplier, 1.1);
+    await assert.rejects(saveConfiguration(options, edited), /configuration revision conflict/);
+    const settingsInsert = mock.requests.findIndex((request) => request.query.startsWith("INSERT INTO analytics_settings"));
+    const pricingInsert = mock.requests.findIndex((request) => request.query.startsWith("INSERT INTO pricing_catalog"));
+    const markerInsert = mock.requests.findLastIndex((request) => request.query.startsWith("INSERT INTO configuration_revisions"));
+    assert.ok(settingsInsert >= 0 && pricingInsert > settingsInsert && markerInsert > pricingInsert);
+    assert.ok(mock.requests.some((request) => request.query.includes("SELECT DISTINCT key, value_json")));
+    assert.ok(mock.requests.some((request) => request.query.includes("SELECT DISTINCT *") && request.query.includes("FROM pricing_catalog")));
+  });
 });
 
 test("ClickHouse fork pre-scan excludes unchanged sources", async () => {
@@ -536,6 +589,10 @@ test("ClickHouse report pins one committed generation across every query", async
   assert.equal((quantileQuery.match(/quantileExactIf\(0\.10\)/g) || []).length, 2);
   assert.equal((quantileQuery.match(/quantileExactIf\(0\.99\)/g) || []).length, 2);
   assert.doesNotMatch(quantileQuery, /quantileTDigestIf/);
+  const usageStatsQuery = mock.requests.find((request) => request.query.includes("quarterHourlyProviderModels"))?.query;
+  assert.ok(usageStatsQuery);
+  assert.match(usageStatsQuery, /toStartOfInterval\(parseDateTimeBestEffortOrNull\(timestamp\), INTERVAL 15 MINUTE\)/);
+  assert.match(usageStatsQuery, /projectQuarterHourlyProviderModels/);
 });
 
 test("ClickHouse legacy header union uses explicit migration-safe column order", async () => {

@@ -7,6 +7,7 @@ const Path = require("node:path");
 const test = require("node:test");
 const { newReport, startWebServer, syncDatabase } = require("../app");
 const {
+  MAX_CONFIGURATION_BODY_BYTES,
   createReportCache,
   createSyncController,
   createWebServer,
@@ -51,6 +52,14 @@ test("web server serves stored SQLite summary and sessions", async () => {
     assert.equal(summary.total.requests, 1);
     assert.equal(summary.total.output, 1_000_000);
     assert.equal(summary.topModels[0].name, "gpt-5.4-mini");
+    assert.equal(summary.timeline, undefined);
+
+    const timeline = await fetch(`${base}/api/timeline?days=1`).then((response) => response.json());
+    assert.equal(timeline.length, 1);
+    assert.equal(timeline[0].name, "2026-07-05T00:00Z");
+    const projectTimeline = await fetch(`${base}/api/timeline?project=${encodeURIComponent("/tmp/project-web")}`).then((response) => response.json());
+    assert.equal(projectTimeline.length, 1);
+    assert.equal(projectTimeline[0].output, 1_000_000);
 
     const sessions = await fetch(`${base}/api/sessions`).then((response) => response.json());
     assert.equal(sessions.length, 1);
@@ -126,6 +135,80 @@ test("web server returns 404 for unknown routes and 405 for non-GET requests", a
     const methodNotAllowed = await fetch(`${base}/api/summary`, { method: "POST" });
     assert.equal(methodNotAllowed.status, 405);
     assert.deepEqual(await methodNotAllowed.json(), { error: "method not allowed" });
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("configuration API is readable but loopback and action-header protected for writes", async () => {
+  const configuration = {
+    revision: "catalog-a",
+    settings: { openaiContext: "auto", pricingBasis: "standard", regionalMultiplier: 1 },
+    prices: [],
+  };
+  let saved = null;
+  const web = createWebServer({
+    buildReportFromSelectedDatabase: async () => ({ ...newReport(), configurationRevision: "catalog-a" }),
+    resolveDbPath: () => Path.join(os.tmpdir(), "tokenomics-config-api.sqlite"),
+    loadConfiguration: async () => configuration,
+    saveConfiguration: async (_options, next) => {
+      saved = next;
+      return { ...next, revision: "catalog-b" };
+    },
+  });
+  const server = await web.startWebServer(defaultOptions({
+    preloadedReport: { ...newReport(), configurationRevision: "catalog-a" },
+    host: "127.0.0.1",
+    port: 0,
+  }));
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const getResponse = await fetch(`${base}/api/configuration`);
+    assert.equal(getResponse.status, 200);
+    assert.equal((await getResponse.json()).configuration.revision, "catalog-a");
+
+    const rejected = await fetch(`${base}/api/configuration`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(configuration),
+    });
+    assert.equal(rejected.status, 403);
+    assert.equal(saved, null);
+
+    const crossSite = await fetch(`${base}/api/configuration`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        "sec-fetch-site": "cross-site",
+        "x-tokenomics-action": "configuration",
+      },
+      body: JSON.stringify(configuration),
+    });
+    assert.equal(crossSite.status, 403);
+    assert.equal(saved, null);
+
+    const oversized = await fetch(`${base}/api/configuration`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        "x-tokenomics-action": "configuration",
+      },
+      body: JSON.stringify({ padding: "x".repeat(MAX_CONFIGURATION_BODY_BYTES) }),
+    });
+    assert.equal(oversized.status, 413);
+    assert.equal(saved, null);
+
+    const accepted = await fetch(`${base}/api/configuration`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        "x-tokenomics-action": "configuration",
+      },
+      body: JSON.stringify(configuration),
+    });
+    assert.equal(accepted.status, 200);
+    assert.equal((await accepted.json()).configuration.revision, "catalog-b");
+    assert.equal(saved.revision, "catalog-a");
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

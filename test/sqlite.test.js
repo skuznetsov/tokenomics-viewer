@@ -6,13 +6,14 @@ const os = require("node:os");
 const Path = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
 const test = require("node:test");
-const { buildReport, buildReportFromDatabase, syncDatabase } = require("../app");
+const { buildReport, buildReportFromDatabase, loadConfiguration, saveConfiguration, syncDatabase } = require("../app");
 const {
   ANALYTICS_DERIVATION_VERSION,
   PRICING_CATALOG_VERSION,
   sourceFingerprint,
 } = require("../lib/core/derivation");
 const { createSqliteBackend } = require("../lib/storage/sqlite");
+const { PACKAGED_CONFIGURATION_REVISION } = require("../lib/core/configuration");
 const { defaultOptions } = require("./support/fixtures");
 
 function totalSnapshot(report) {
@@ -121,6 +122,8 @@ test("syncDatabase imports sources idempotently and replaces changed sessions", 
   const second = await syncDatabase(defaultOptions({ db, paths: [jsonl] }));
 
   assert.equal(first.total.requests, 1);
+  assert.equal(first.quarterHourly["2026-07-05T00:00Z"].requests, 1);
+  assert.equal(first.projectQuarterHourly["/tmp/project-db"]["2026-07-05T00:00Z"].requests, 1);
   assert.equal(second.total.requests, 1);
   assert.equal(second.total.output, 200_000);
   assert.equal(second.sessions.length, 1);
@@ -151,7 +154,44 @@ test("syncDatabase imports sources idempotently and replaces changed sessions", 
 
   const fromDb = buildReportFromDatabase(db, defaultOptions());
   assert.equal(fromDb.total.requests, 1);
+  assert.equal(fromDb.quarterHourly["2026-07-05T00:00Z"].requests, 1);
   assert.equal(fromDb.total.output, 300_000);
+});
+
+test("pricing edits mark stored SQLite costs stale and reprice unchanged sources on sync", async () => {
+  const tmp = fs.mkdtempSync(Path.join(os.tmpdir(), "tokenomics-db-reprice-test-"));
+  const jsonl = Path.join(tmp, "session.jsonl");
+  const db = Path.join(tmp, "tokenomics.sqlite");
+  fs.writeFileSync(jsonl, [
+    JSON.stringify({
+      type: "turn_context",
+      timestamp: "2026-07-05T00:00:00.000Z",
+      payload: { cwd: "/tmp/project-reprice", model: "gpt-5-codex", effort: "high" },
+    }),
+    JSON.stringify({
+      type: "event_msg",
+      timestamp: "2026-07-05T00:00:01.000Z",
+      payload: { type: "token_count", info: { last_token_usage: { input_tokens: 1_000_000, cached_input_tokens: 100_000, output_tokens: 100_000 } } },
+    }),
+    "",
+  ].join("\n"));
+  const options = defaultOptions({ db, paths: [jsonl] });
+  const before = await syncDatabase(options);
+  const configuration = await loadConfiguration(options);
+  const edited = structuredClone(configuration);
+  edited.settings.pricingBasis = "custom";
+  edited.prices.find((row) => row.provider === "openai" && row.model === "gpt-5-codex" && row.variant === "short").input *= 2;
+  const saved = await saveConfiguration(options, edited);
+
+  const stale = buildReportFromDatabase(db, options);
+  assert.equal(stale.configurationRevision, saved.revision);
+  assert.equal(stale.pricingStale, true);
+  assert.equal(stale.total.costUsd, before.total.costUsd);
+
+  const repriced = await syncDatabase(options);
+  assert.equal(repriced.configurationRevision, saved.revision);
+  assert.equal(repriced.pricingStale, false);
+  assert.ok(repriced.total.costUsd > before.total.costUsd);
 });
 
 test("SQLite persists versioned fingerprints and reimports a stale derivation", async () => {
@@ -166,6 +206,7 @@ test("SQLite persists versioned fingerprints and reimports a stale derivation", 
     kind: "jsonl",
     size: stat.size,
     mtimeMs: stat.mtimeMs,
+    pricingRevision: PACKAGED_CONFIGURATION_REVISION,
   });
   const stored = new DatabaseSync(db);
   try {

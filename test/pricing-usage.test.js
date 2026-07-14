@@ -857,6 +857,9 @@ test("date and ISO week keys honor their calendar boundaries", () => {
   assert.equal(reportModel.dateKey(nextDay), "2026-01-05");
   assert.equal(reportModel.weekKey(new Date(2021, 0, 1)), "2020-W53");
   assert.equal(reportModel.weekKey(new Date(2021, 0, 4)), "2021-W01");
+  assert.equal(reportModel.quarterHourKey(new Date("2026-07-10T12:14:59.999Z")), "2026-07-10T12:00Z");
+  assert.equal(reportModel.quarterHourKey(new Date("2026-07-10T12:15:00.000Z")), "2026-07-10T12:15Z");
+  assert.equal(reportModel.quarterHourKey(new Date(NaN)), null);
 });
 
 test("addUsage updates the shared report buckets through the aggregate module", () => {
@@ -874,5 +877,24 @@ test("addUsage updates the shared report buckets through the aggregate module", 
   assert.equal(report.total.requests, 1);
   assert.equal(report.daily["2026-07-10"].requests, 1);
   assert.equal(report.projects["/tmp/core-test"].requests, 1);
+  assert.equal(report.quarterHourly["2026-07-10T12:00Z"].requests, 1);
+  assert.equal(report.projectQuarterHourly["/tmp/core-test"]["2026-07-10T12:00Z"].requests, 1);
   assert.equal(report.efforts.high.requests, 1);
+});
+
+test("project model aggregation keeps provider identity for equal model ids", () => {
+  const report = reportModel.newReport();
+  const base = {
+    model: "shared-model",
+    project: "/tmp/provider-identity",
+    effort: "high",
+    timestamp: new Date("2026-07-10T12:00:00.000Z"),
+    usage: simpleUsage(100, 10),
+  };
+  aggregate.addUsage(report, { ...base, provider: "openai" }, pricingOptions);
+  aggregate.addUsage(report, { ...base, provider: "acme-ai" }, pricingOptions);
+
+  assert.equal(report.projectProviderModels[base.project].openai[base.model].requests, 1);
+  assert.equal(report.projectProviderModels[base.project]["acme-ai"][base.model].requests, 1);
+  assert.equal(report.projectModels[base.project][base.model].requests, 2);
 });

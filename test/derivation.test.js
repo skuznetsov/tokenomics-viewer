@@ -46,3 +46,11 @@ test("source fingerprints invalidate when either derivation version changes", ()
   assert.match(current, new RegExp(`analyticsDerivationVersion=${ANALYTICS_DERIVATION_VERSION}`));
   assert.match(current, new RegExp(`pricingCatalogVersion=${PRICING_CATALOG_VERSION}`));
 });
+
+test("source fingerprints include the active database pricing revision", () => {
+  const first = sourceFingerprint({ ...sourceParts, pricingRevision: "catalog-a" });
+  const second = sourceFingerprint({ ...sourceParts, pricingRevision: "catalog-b" });
+
+  assert.notEqual(first, second);
+  assert.match(first, /pricingRevision=catalog-a/);
+});

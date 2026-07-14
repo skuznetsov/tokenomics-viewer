@@ -41,7 +41,9 @@ const storage = createStorage({
 
 const web = createWebServer({
   buildReportFromSelectedDatabase: storage.buildReportFromSelectedDatabase,
+  loadConfiguration: storage.loadConfiguration,
   resolveDbPath: storage.resolveDbPath,
+  saveConfiguration: storage.saveConfiguration,
   syncDatabase: storage.syncDatabase,
 });
 
@@ -105,12 +107,14 @@ module.exports = {
   createLineProcessor,
   discoverInputs: ingest.discoverInputs,
   finalizeRateLimits,
+  loadConfiguration: storage.loadConfiguration,
   main,
   newReport,
   parseArgs,
   processJsonlFile: ingest.processJsonlFile,
   processZipFile: ingest.processZipFile,
   renderReport: reportText.renderReport,
+  saveConfiguration: storage.saveConfiguration,
   startWebServer: web.startWebServer,
   syncDatabase: storage.syncDatabase,
   usageFromClaudeUsage,

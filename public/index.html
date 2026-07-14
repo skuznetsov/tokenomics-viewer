@@ -53,6 +53,13 @@
     .swatch { width:10px; height:10px; border-radius:999px; display:inline-block; }
     .chart-wrap { position:relative; min-height:390px; }
     .compact-chart-wrap, .project-chart-wrap { position:relative; min-height:330px; }
+    .chart-tooltip { position:absolute; z-index:4; display:none; min-width:250px; max-width:min(420px, calc(100% - 16px)); max-height:260px; overflow:auto; padding:9px 10px; border:1px solid var(--line); border-radius:6px; background:color-mix(in srgb, var(--panel) 96%, transparent); box-shadow:0 8px 24px rgba(0,0,0,.16); pointer-events:none; font-size:12px; }
+    .chart-tooltip.visible { display:block; }
+    .tooltip-title { font-weight:700; margin-bottom:5px; }
+    .tooltip-row { display:grid; grid-template-columns:minmax(110px, 1fr) auto; gap:12px; align-items:center; padding:4px 0; border-top:1px solid var(--line); }
+    .tooltip-model { display:flex; align-items:center; gap:6px; min-width:0; }
+    .tooltip-model span:last-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .tooltip-value { text-align:right; font-variant-numeric:tabular-nums; }
     .mix-canvas { width:100%; height:390px; display:block; cursor:crosshair; touch-action:none; }
     .compact-canvas { height:330px; }
     .range-row { display:flex; justify-content:flex-end; margin-top:-4px; }
@@ -74,6 +81,26 @@
     .metric-cell { display:grid; justify-items:end; gap:1px; }
     .metric-cell strong { color:var(--fg); font-weight:650; }
     .metric-cell span { color:var(--muted); font-size:11px; }
+    .project-model-summary { margin-top:12px; border-top:1px solid var(--line); padding-top:10px; }
+    .project-model-table { width:100%; border-collapse:collapse; min-width:1120px; }
+    .settings-grid { display:grid; grid-template-columns:repeat(3, minmax(180px, 1fr)); gap:10px; margin-bottom:14px; }
+    .settings-field { display:grid; gap:5px; color:var(--muted); font-size:12px; }
+    .settings-field select, .settings-field input, .pricing-table input, .pricing-table select { min-height:32px; border:1px solid var(--line); border-radius:5px; padding:5px 7px; color:var(--fg); background:var(--panel); }
+    .settings-actions { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:8px; }
+    .configuration-status.stale { color:var(--warn); }
+    .pricing-table { width:100%; border-collapse:collapse; min-width:1580px; }
+    .pricing-table th, .pricing-table td { padding:6px 5px; }
+    .pricing-scroll { max-height:min(68vh, 760px); border-top:1px solid var(--line); }
+    .pricing-table thead th { position:sticky; top:0; z-index:2; background:var(--panel); }
+    .pricing-table th:first-child, .pricing-table td:first-child { position:sticky; left:0; z-index:1; width:104px; background:var(--panel); }
+    .pricing-table th:nth-child(2), .pricing-table td:nth-child(2) { position:sticky; left:104px; z-index:1; width:190px; background:var(--panel); box-shadow:1px 0 0 var(--line); }
+    .pricing-table thead th:first-child, .pricing-table thead th:nth-child(2) { z-index:3; }
+    .pricing-table input, .pricing-table select { width:100%; min-width:86px; }
+    .pricing-table .price-model { min-width:180px; }
+    .pricing-table .price-source { min-width:200px; }
+    .pricing-table .price-number { min-width:80px; text-align:right; }
+    .icon-button { width:32px; height:32px; border:1px solid var(--line); border-radius:6px; color:var(--fg); background:var(--panel); cursor:pointer; font-size:18px; line-height:1; }
+    .icon-button:hover { border-color:var(--out); color:var(--out); }
     .is-hidden { display:none !important; }
     #efficiency-table { width:100%; border-collapse:collapse; min-width:920px; }
     th, td { padding:8px 10px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }
@@ -101,8 +128,8 @@
     body[data-dashboard-mode="analyst"] .overview-only { display:none !important; }
     body[data-dashboard-mode="overview"] .analysis-grid { grid-template-columns:1fr; }
     @media (max-width: 1180px) { .cards { grid-template-columns:repeat(3, minmax(0, 1fr)); } .card:nth-child(3) { border-right:0; } .card:nth-child(n+4) { border-top:1px solid var(--line); } .analysis-grid { grid-template-columns:1fr; } }
-    @media (max-width: 760px) { .cards { grid-template-columns:repeat(2, minmax(0, 1fr)); } .card, .card:nth-child(3) { border-right:1px solid var(--line); border-top:1px solid var(--line); } .card:nth-child(-n+2) { border-top:0; } .card:nth-child(2n) { border-right:0; } .card:last-child { grid-column:1 / -1; border-right:0; } .panel-head { display:grid; } .hover-legend { justify-content:flex-start; } .date-controls { justify-content:flex-start; } .recommendation-list { grid-template-columns:1fr; } .recommendation-item:nth-child(odd) { border-right:0; } }
-    @media (max-width: 560px) { .brand-row { align-items:flex-start; flex-wrap:wrap; } .brand-group { align-items:flex-start; flex-direction:column; gap:3px; } .header-actions { width:100%; justify-content:space-between; } .sync-state { max-width:240px; } .section-nav { gap:18px; } main { padding:12px; } .cards { grid-template-columns:1fr; } .card, .card:nth-child(3), .card:nth-child(2n) { border-right:0; border-top:1px solid var(--line); } .card:first-child { border-top:0; } .card:last-child { grid-column:auto; } .token-card .value { white-space:normal; } .chart-wrap, .compact-chart-wrap, .project-chart-wrap { min-height:330px; } .mix-canvas { height:330px; } .range-row { justify-content:flex-start; overflow:auto; } }
+    @media (max-width: 760px) { .cards { grid-template-columns:repeat(2, minmax(0, 1fr)); } .card, .card:nth-child(3) { border-right:1px solid var(--line); border-top:1px solid var(--line); } .card:nth-child(-n+2) { border-top:0; } .card:nth-child(2n) { border-right:0; } .card:last-child { grid-column:1 / -1; border-right:0; } .panel-head { display:grid; } .hover-legend { justify-content:flex-start; } .date-controls { justify-content:flex-start; } .recommendation-list { grid-template-columns:1fr; } .recommendation-item:nth-child(odd) { border-right:0; } .settings-grid { grid-template-columns:1fr; } .settings-actions { justify-content:flex-start; } .pricing-table th:nth-child(2), .pricing-table td:nth-child(2) { position:static; box-shadow:none; } }
+    @media (max-width: 560px) { .brand-row { align-items:flex-start; flex-wrap:wrap; } .brand-group { align-items:flex-start; flex-direction:column; gap:3px; } .header-actions { width:100%; justify-content:space-between; } .sync-state { max-width:240px; } .section-nav { gap:18px; } main { padding:12px; } section { scroll-margin-top:170px; } .cards { grid-template-columns:1fr; } .card, .card:nth-child(3), .card:nth-child(2n) { border-right:0; border-top:1px solid var(--line); } .card:first-child { border-top:0; } .card:last-child { grid-column:auto; } .token-card .value { white-space:normal; } .chart-wrap, .compact-chart-wrap, .project-chart-wrap { min-height:330px; } .mix-canvas { height:330px; } .range-row { justify-content:flex-start; overflow:auto; } }
   </style>
 </head>
 <body data-dashboard-mode="overview">
@@ -124,6 +151,7 @@
       <button class="nav-button active" type="button" data-section-target="overview-section">Summary</button>
       <button class="nav-button analyst-only" type="button" data-section-target="projects-section">Projects</button>
       <button class="nav-button" type="button" data-section-target="models-section">Models</button>
+      <button class="nav-button analyst-only" type="button" data-section-target="pricing-settings">Pricing</button>
       <button class="nav-button analyst-only" type="button" data-section-target="efficiency-section">Diagnostics</button>
     </nav>
   </header>
@@ -136,8 +164,13 @@
     <section>
       <div class="panel-head">
         <div class="panel-title-stack">
-          <h2>Daily Token Flow</h2>
+          <h2>Token Flow</h2>
           <div class="hover-legend" id="daily-token-hover-legend"></div>
+        </div>
+        <div class="segmented" id="token-resolution-controls" aria-label="Token flow resolution">
+          <button class="seg-button" type="button" data-token-resolution="15m">15m</button>
+          <button class="seg-button" type="button" data-token-resolution="hourly">Hourly</button>
+          <button class="seg-button active" type="button" data-token-resolution="daily">Daily</button>
         </div>
       </div>
       <div class="chart-wrap"><canvas class="mix-canvas" id="daily-token-canvas" role="img" aria-label="Daily input, cache, and output token mix"></canvas></div>
@@ -159,6 +192,8 @@
             <div class="hover-legend" id="cost-mix-hover-legend"></div>
           </div>
           <div class="segmented" id="cost-mix-controls" aria-label="Cost mix period">
+            <button class="seg-button" type="button" data-mix-mode="15m">15m</button>
+            <button class="seg-button" type="button" data-mix-mode="hourly">Hourly</button>
             <button class="seg-button" type="button" data-mix-mode="daily">Daily</button>
             <button class="seg-button" type="button" data-mix-mode="weekly">Weekly</button>
             <button class="seg-button" type="button" data-mix-mode="monthly">Monthly</button>
@@ -169,12 +204,18 @@
       <section class="analyst-only" id="projects-section">
         <div class="panel-head">
           <div class="panel-title-stack">
-            <h2>Project Daily Cost</h2>
+            <h2>Project Cost</h2>
             <select class="control-select" id="project-select" aria-label="Project"></select>
+            <div class="segmented" id="project-resolution-controls" aria-label="Project cost resolution">
+              <button class="seg-button" type="button" data-project-resolution="15m">15m</button>
+              <button class="seg-button active" type="button" data-project-resolution="hourly">Hourly</button>
+              <button class="seg-button" type="button" data-project-resolution="daily">Daily</button>
+            </div>
           </div>
           <div class="hover-legend" id="project-hover-legend"></div>
         </div>
         <div class="project-chart-wrap"><canvas class="mix-canvas compact-canvas" id="project-cost-canvas" role="img" aria-label="Daily project cost with input, cache, and output cost mix"></canvas></div>
+        <div class="project-model-summary table-scroll"><table class="project-model-table" id="project-model-breakdown"></table></div>
       </section>
     </div>
     <section id="models-section">
@@ -203,6 +244,30 @@
       </div>
       <div class="model-ranking overview-only" id="model-ranking"></div>
       <div class="table-scroll analyst-only"><table class="model-detail-table" id="models-table"></table></div>
+    </section>
+    <section class="analyst-only" id="pricing-settings">
+      <div class="panel-head">
+        <div class="panel-title-stack">
+          <h2>Pricing &amp; Analytics Settings</h2>
+          <div class="configuration-status muted" id="configuration-status">Loading configuration...</div>
+        </div>
+        <div class="settings-actions">
+          <button class="action-button" id="add-price" type="button">Add price row</button>
+          <button class="action-button" id="save-pricing" type="button">Save</button>
+        </div>
+      </div>
+      <div class="settings-grid">
+        <label class="settings-field">OpenAI context pricing
+          <select id="setting-openai-context"><option value="auto">Auto</option><option value="short">Short</option><option value="long">Long</option></select>
+        </label>
+        <label class="settings-field">Pricing basis
+          <select id="setting-pricing-basis"><option value="standard">Standard API equivalent</option><option value="custom">Custom</option></select>
+        </label>
+        <label class="settings-field">Global rate multiplier
+          <input id="setting-regional-multiplier" type="number" min="0.5" max="2" step="0.01" inputmode="decimal">
+        </label>
+      </div>
+      <div class="table-scroll pricing-scroll"><table class="pricing-table" id="pricing-table"></table></div>
     </section>
     <section class="analyst-only" id="efficiency-section">
       <div class="panel-head">
@@ -296,6 +361,23 @@
       return formatTokenCount(segmentTokens(row, key)) + ' / ' +
         formatUsdCompact(segmentCost(row, key)) + ' / ' +
         formatPct(share);
+    }
+
+    function tariffCoverage(row = {}) {
+      return row.requests > 0 ? (row.pricedRequests || 0) / row.requests : 0;
+    }
+
+    function cacheWriteTokens(row = {}) {
+      return (row.cacheCreate5m || 0) + (row.cacheCreate30m || 0) + (row.cacheCreate1h || 0);
+    }
+
+    function cacheWriteCost(row = {}) {
+      const costs = row.costsUsd || {};
+      return (costs.cacheCreate5m || 0) + (costs.cacheCreate30m || 0) + (costs.cacheCreate1h || 0);
+    }
+
+    function metricCell(tokens, cost) {
+      return '<div class="metric-cell"><strong>' + esc(formatTokenCount(tokens)) + '</strong><span>' + esc(formatUsdCompact(cost)) + '</span></div>';
     }
 
     function totalTokens(row = {}) {
@@ -463,6 +545,89 @@
       { key: 'cache', pctKey: 'cachePct', label: 'Cache', color: () => colors.cache },
       { key: 'output', pctKey: 'outputPct', label: 'Out', color: () => colors.output },
     ];
+    const modelPalette = ['#2563eb', '#0f9f6e', '#d64b22', '#b7791f', '#0891b2', '#c0266d', '#5b8c32', '#7c5cfc', '#00897b', '#d97706'];
+
+    function modelColor(name) {
+      let hash = 0;
+      for (const char of String(name || 'unknown')) hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+      return modelPalette[Math.abs(hash) % modelPalette.length];
+    }
+
+    function drawSharedModelSeries(ctx, points, config, y) {
+      if (!config.showModels) return;
+      const keys = [...new Set(points.flatMap(point => (point.row.models || []).map(model => model.name)))];
+      for (const key of keys) {
+        const color = modelColor(key);
+        let run = [];
+        const flush = () => {
+          if (run.length > 1) {
+            ctx.save();
+            ctx.strokeStyle = color;
+            ctx.globalAlpha = .82;
+            ctx.lineWidth = 1.5;
+            drawCanvasCatmullRom(ctx, run, .75);
+            ctx.stroke();
+            ctx.restore();
+          }
+          run = [];
+        };
+        let previousTime = null;
+        for (const point of points) {
+          const currentTime = Date.parse(point.row.name.length === 10 ? point.row.name + 'T00:00:00Z' : point.row.name);
+          if (previousTime != null && config.intervalMs && currentTime - previousTime > config.intervalMs * 1.5) flush();
+          previousTime = currentTime;
+          const model = (point.row.models || []).find(candidate => candidate.name === key);
+          if (!model) {
+            flush();
+            continue;
+          }
+          run.push({ x: point.x, y: y(config.value(model)), model });
+        }
+        flush();
+        for (const point of points) {
+          const model = (point.row.models || []).find(candidate => candidate.name === key);
+          if (!model) continue;
+          ctx.save();
+          ctx.fillStyle = color;
+          ctx.strokeStyle = colors.panel;
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.arc(point.x, y(config.value(model)), 3.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+    }
+
+    function renderSharedModelTooltip(chart, point, config, canvasWidth) {
+      const canvas = document.getElementById(chart.canvasId);
+      if (!canvas?.parentElement) return;
+      let tooltip = canvas.parentElement.querySelector('.chart-tooltip');
+      if (!tooltip) {
+        tooltip = document.createElement('div');
+        tooltip.className = 'chart-tooltip';
+        canvas.parentElement.appendChild(tooltip);
+      }
+      if (!point || !config.showModels) {
+        tooltip.classList.remove('visible');
+        return;
+      }
+      const row = point.row;
+      const totalCost = row.costUsd || 0;
+      const total = totalTokens(row);
+      tooltip.innerHTML =
+        '<div class="tooltip-title">' + esc(config.title(row)) + '</div>' +
+        '<div class="muted">Total ' + esc(formatUsdCompact(totalCost)) + ' · ' + esc(formatTokenCount(total)) + ' tokens</div>' +
+        (row.models || []).map(model => {
+          const share = totalCost > 0 ? (model.costUsd || 0) / totalCost : (total > 0 ? totalTokens(model) / total : 0);
+          return '<div class="tooltip-row"><div class="tooltip-model"><span class="swatch" style="background:' + esc(modelColor(model.name)) + '"></span><span title="' + esc(model.name) + '">' + esc(model.name) + '</span></div>' +
+            '<div class="tooltip-value">' + esc(formatUsdCompact(model.costUsd || 0)) + ' / ' + esc(formatTokenCount(totalTokens(model))) + ' / ' + esc(formatPct(share)) + '</div></div>';
+        }).join('');
+      tooltip.style.left = Math.max(8, Math.min(point.x + 12, canvasWidth - 300)) + 'px';
+      tooltip.style.top = Math.max(8, point.y - 24) + 'px';
+      tooltip.classList.add('visible');
+    }
 
     function sharedMixKey(rows, config) {
       return config.key + '|' + rows.map(row => row.name).join('\\u0000');
@@ -486,7 +651,7 @@
       if (count === 0) return;
       let nextStart = Math.round(Math.min(start, end));
       let nextEnd = Math.round(Math.max(start, end));
-      const minWindow = Math.min(3, count);
+      const minWindow = Math.min(1, count);
       if (nextEnd - nextStart + 1 < minWindow) {
         const center = (nextStart + nextEnd) / 2;
         nextStart = Math.round(center - (minWindow - 1) / 2);
@@ -512,8 +677,8 @@
       const currentLength = range.end - range.start + 1;
       const steps = Math.max(1, Math.abs(direction));
       const factor = direction < 0 ? Math.pow(1 / WHEEL_ZOOM_FACTOR, steps) : Math.pow(WHEEL_ZOOM_FACTOR, steps);
-      let nextLength = clamp(Math.round(currentLength * factor), Math.min(3, count), count);
-      if (nextLength === currentLength) nextLength = clamp(currentLength + (direction < 0 ? -1 : 1), Math.min(3, count), count);
+      let nextLength = clamp(Math.round(currentLength * factor), Math.min(1, count), count);
+      if (nextLength === currentLength) nextLength = clamp(currentLength + (direction < 0 ? -1 : 1), Math.min(1, count), count);
       const ratio = clamp((canvasX - chart.plot.left) / chart.plot.width, 0, 1);
       const anchor = range.start + ratio * (currentLength - 1);
       const nextStart = Math.round(anchor - ratio * (nextLength - 1));
@@ -637,7 +802,7 @@
         sharedMixSegments.map(segment => (
           '<span class="mix-pill"><span class="swatch" style="background:' + esc(segment.color()) + '"></span>' +
           esc(segment.label) + ' ' + esc(segmentShareText(row, segment, mix)) + '</span>'
-        )).join('');
+        )).join('') + (config.extraLegend ? config.extraLegend(row) : '');
     }
 
     function renderSharedMixChart(chart, rows, config) {
@@ -655,6 +820,7 @@
         chart.nodes = [];
         chart.plot = null;
         renderSharedMixLegend(chart, null, config);
+        renderSharedModelTooltip(chart, null, config, width);
         ctx.save();
         ctx.fillStyle = colors.muted;
         ctx.font = '13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -722,7 +888,7 @@
 
       const points = visible.map((row, index) => ({ x: x(index), y: y(config.value(row)), row, globalIndex: range.start + index }));
       ctx.strokeStyle = colors.fg;
-      ctx.globalAlpha = .55;
+      ctx.globalAlpha = config.showModels ? .28 : .55;
       ctx.lineWidth = 2.2;
       drawCanvasCatmullRom(ctx, points, .9);
       ctx.stroke();
@@ -730,6 +896,7 @@
 
       chart.nodes = points;
       const hoverPoint = points.find(point => point.globalIndex === chart.hoverIndex) || null;
+      const pinnedPoint = config.pinOnClick ? points.find(point => point.globalIndex === chart.pinnedIndex) || null : null;
       if (hoverPoint) drawSharedHoverGuide(ctx, hoverPoint, plot, config.xLabel(hoverPoint.row));
       for (const point of points) {
         drawSharedPoint(ctx, point, {
@@ -737,6 +904,7 @@
           pinned: config.pinOnClick && point.globalIndex === chart.pinnedIndex,
         });
       }
+      drawSharedModelSeries(ctx, points, config, y);
 
       ctx.fillStyle = colors.muted;
       ctx.textAlign = 'center';
@@ -753,46 +921,83 @@
           ? chart.rows[chart.pinnedIndex]
           : (config.summaryRow || chart.rows[range.start] || visible[0]));
       renderSharedMixLegend(chart, legendRow, config);
+      renderSharedModelTooltip(chart, hoverPoint || pinnedPoint, config, width);
       ctx.restore();
     }
 
     function renderProjectDailyChart(selectedProject) {
       projectChart.selectedProject = selectedProject || null;
       projectChart.selectedProjectName = selectedProject?.name || null;
-      renderSharedMixChart(projectChart, selectedProject?.daily || [], {
-        key: 'project-' + (selectedProject?.name || ''),
-        emptyText: selectedProject ? 'No daily project data' : 'No projects',
-        yLabel: 'daily project cost (log)',
+      renderProjectResolutionControls();
+      renderSharedMixChart(projectChart, projectTimelineRows(selectedProject), {
+        key: 'project-' + projectResolution + '-' + (selectedProject?.name || ''),
+        emptyText: selectedProject
+          ? (projectTimelineRequests.has(projectTimelineKey(selectedProject)) ? 'Loading project timeline...' : 'No project timeline data')
+          : 'No projects',
+        yLabel: projectResolution + ' project cost (log)',
         value: row => row.costUsd || 0,
         valueText: row => formatUsdCompact(row.costUsd || 0),
         axisText: value => formatUsdCompact(value),
         scale: moneyScale,
         mix: costMix,
         title: row => selectedProject
-          ? selectedProject.name + ' · ' + (row.name === 'Total' ? 'Total' : row.name)
+          ? selectedProject.name + ' · ' + (row.name === 'Total' ? 'Total' : periodLabel(row.name))
           : row.name,
         displayTitle: row => selectedProject
-          ? projectLabel(selectedProject.name) + ' · ' + (row.name === 'Total' ? 'Total' : row.name)
+          ? projectLabel(selectedProject.name) + ' · ' + (row.name === 'Total' ? 'Total' : periodLabel(row.name))
           : row.name,
-        xLabel: row => row.name,
+        xLabel: row => periodLabel(row.name),
         summaryRow: selectedProject ? { ...selectedProject, name: 'Total' } : null,
         pinOnClick: true,
+        showModels: true,
+        intervalMs: projectResolution === '15m' ? 900_000 : projectResolution === 'hourly' ? 3_600_000 : 86_400_000,
+        extraLegend: row =>
+          '<span class="mix-pill">Tariff coverage ' + esc(formatPct(tariffCoverage(row))) + '</span>' +
+          '<span class="mix-pill">Cache write ' + esc(formatTokenCount(cacheWriteTokens(row))) + ' tokens / ' + esc(formatUsdCompact(cacheWriteCost(row))) + '</span>' +
+          '<span class="mix-pill">Cache read ' + esc(formatTokenCount(row.cacheRead || 0)) + ' tokens / ' + esc(formatUsdCompact(row.costsUsd?.cacheRead || 0)) + '</span>',
       });
+      renderProjectModelBreakdown(selectedProject);
+    }
+
+    function renderProjectModelBreakdown(selectedProject) {
+      const table = document.getElementById('project-model-breakdown');
+      const rows = selectedProject?.models || [];
+      const totalCost = selectedProject?.costUsd || 0;
+      table.innerHTML =
+        '<thead><tr><th>Provider / model</th><th>Requests</th><th>Tariff coverage</th><th>Cost / share</th><th>Input tokens</th><th>Cache write tokens</th><th>Cache read tokens</th><th>Output tokens</th></tr></thead>' +
+        '<tbody>' + rows.map(row => (
+          '<tr><td><strong>' + esc(row.model) + '</strong><span class="model-provider">' + esc(row.provider) + '</span></td>' +
+          '<td>' + esc(formatTokenCount(row.requests || 0)) + '</td>' +
+          '<td>' + esc(formatPct(tariffCoverage(row))) + '</td>' +
+          '<td>' + esc(formatUsdCompact(row.costUsd || 0)) + ' / ' + esc(formatPct(totalCost > 0 ? (row.costUsd || 0) / totalCost : 0)) + '</td>' +
+          '<td>' + metricCell(row.input || 0, row.costsUsd?.input || 0) + '</td>' +
+          '<td>' + metricCell(cacheWriteTokens(row), cacheWriteCost(row)) + '</td>' +
+          '<td>' + metricCell(row.cacheRead || 0, row.costsUsd?.cacheRead || 0) + '</td>' +
+          '<td>' + metricCell(row.output || 0, row.costsUsd?.output || 0) + '</td></tr>'
+        )).join('') + (rows.length ? '' : '<tr><td colspan="8" class="muted">No model data for this project</td></tr>') + '</tbody>';
     }
 
     function renderDailyTokenChart(rows) {
       renderSharedMixChart(dailyTokenChart, rows || [], {
-        key: 'daily-token',
+        key: 'token-' + tokenResolution,
         emptyText: 'No daily token data',
-        yLabel: 'tokens/day (log)',
+        yLabel: 'tokens/' + tokenResolution + ' (log)',
         value: row => totalTokens(row),
         valueText: row => formatTokenCount(totalTokens(row)) + ' tokens · ' + formatUsdCompact(row.costUsd || 0),
         axisText: value => formatTokenCount(value),
         scale: tokenScale,
         mix: tokenMix,
-        title: row => row.name,
-        displayTitle: row => row.name,
-        xLabel: row => row.name.slice(5) || row.name,
+        title: row => periodLabel(row.name),
+        displayTitle: row => periodLabel(row.name),
+        xLabel: row => periodLabel(row.name),
+        showModels: true,
+        intervalMs: tokenResolution === '15m' ? 900_000 : tokenResolution === 'hourly' ? 3_600_000 : 86_400_000,
+      });
+    }
+
+    function renderProjectResolutionControls() {
+      document.querySelectorAll('#project-resolution-controls [data-project-resolution]').forEach(button => {
+        button.classList.toggle('active', button.dataset.projectResolution === projectResolution);
       });
     }
 
@@ -879,11 +1084,20 @@
     }
 
     let cachedSummary = null;
+    let timelineGeneration = 0;
+    const globalTimelineCache = new Map();
+    const globalTimelineRequests = new Map();
+    const projectTimelineCache = new Map();
+    const projectTimelineRequests = new Map();
     let costMixMode = 'daily';
+    let tokenResolution = 'daily';
+    let projectResolution = 'hourly';
     let dailyRangeDays = 90;
     let modelDateMode = 'relative';
     let modelRelativeDays = Infinity;
     let efficiencyModelKey = null;
+    let configurationState = null;
+    let configurationRequiresSync = false;
     const overviewModelLimit = 10;
     let dashboardMode = storedDashboardMode();
 
@@ -905,7 +1119,7 @@
       if (persist) {
         try { localStorage.setItem('tokenomics-dashboard-mode', dashboardMode); } catch {}
       }
-      if (dashboardMode === 'overview' && ['projects-section', 'efficiency-section'].includes(activeSectionTarget)) {
+      if (dashboardMode === 'overview' && ['projects-section', 'pricing-settings', 'efficiency-section'].includes(activeSectionTarget)) {
         activeSectionTarget = 'overview-section';
       }
       if (cachedSummary) {
@@ -913,19 +1127,100 @@
         renderCostMix(cachedSummary);
         renderModelAnalysis(cachedSummary);
         requestAnimationFrame(() => {
-          renderDailyTokenChart(dailyRowsInRange(cachedSummary.daily));
-          if (dashboardMode === 'analyst') renderProjectDailyChart(selectedProjectFromSummary(cachedSummary));
+          renderDailyTokenChart(tokenFlowRows(cachedSummary));
+          if (dashboardMode === 'analyst') {
+            renderProjectDailyChart(selectedProjectFromSummary(cachedSummary));
+            loadSelectedProjectTimeline();
+          }
         });
+        if (usesIntradayGlobalTimeline()) loadGlobalTimelineViews();
       }
       syncSectionNav();
     }
 
-    function dailyRowsInRange(rows) {
+    function timelineRowsInRange(rows) {
       if (!Number.isFinite(dailyRangeDays) || !rows?.length) return rows || [];
-      const lastTime = Date.parse(rows.at(-1).name + 'T00:00:00Z');
-      if (!Number.isFinite(lastTime)) return rows;
-      const cutoff = lastTime - (dailyRangeDays - 1) * 86_400_000;
-      return rows.filter(row => Date.parse(row.name + 'T00:00:00Z') >= cutoff);
+      const periodTime = row => Date.parse(row.name.length === 10 ? row.name + 'T00:00:00Z' : row.name);
+      const lastDay = Date.parse(rows.at(-1).name.slice(0, 10) + 'T00:00:00Z');
+      if (!Number.isFinite(lastDay)) return rows;
+      const cutoff = lastDay - (dailyRangeDays - 1) * 86_400_000;
+      return rows.filter(row => periodTime(row) >= cutoff);
+    }
+
+    function timelineBucketName(name, resolution) {
+      if (resolution === '15m') return name;
+      if (resolution === 'hourly') return name.slice(0, 13) + ':00Z';
+      return name.slice(0, 10);
+    }
+
+    function aggregateTimelineRows(rows, resolution) {
+      const buckets = new Map();
+      for (const row of rows || []) {
+        const name = timelineBucketName(row.name, resolution);
+        if (!buckets.has(name)) buckets.set(name, { name, ...emptyPeriodStats(), models: new Map() });
+        const target = buckets.get(name);
+        addPeriodStats(target, row);
+        for (const model of row.models || []) {
+          const key = model.name || (model.provider + '/' + model.model);
+          if (!target.models.has(key)) target.models.set(key, { name: key, provider: model.provider, model: model.model, ...emptyPeriodStats() });
+          addPeriodStats(target.models.get(key), model);
+        }
+      }
+      return [...buckets.values()].map(row => ({
+        ...row,
+        models: [...row.models.values()].sort((a, b) => b.costUsd - a.costUsd || a.name.localeCompare(b.name)),
+      })).sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    function dailyRowsWithModels(summary) {
+      const buckets = new Map((summary.daily || []).map(row => [row.name, { ...row, models: new Map() }]));
+      for (const group of summary.providerModelEffortDaily || []) {
+        const key = group.provider + '/' + group.model;
+        for (const row of group.daily || []) {
+          const bucket = buckets.get(row.name);
+          if (!bucket) continue;
+          if (!bucket.models.has(key)) {
+            bucket.models.set(key, { name: key, provider: group.provider, model: group.model, ...emptyPeriodStats() });
+          }
+          addPeriodStats(bucket.models.get(key), row);
+        }
+      }
+      return [...buckets.values()].map(row => ({
+        ...row,
+        models: [...row.models.values()].sort((a, b) => b.costUsd - a.costUsd || a.name.localeCompare(b.name)),
+      }));
+    }
+
+    function globalTimelineKey() {
+      return timelineGeneration + ':' + (Number.isFinite(dailyRangeDays) ? dailyRangeDays : 'all');
+    }
+
+    function projectTimelineKey(project) {
+      return timelineGeneration + ':' + project.name;
+    }
+
+    function currentGlobalTimeline() {
+      return globalTimelineCache.get(globalTimelineKey()) || [];
+    }
+
+    function usesIntradayGlobalTimeline() {
+      return tokenResolution !== 'daily' || costMixMode === '15m' || costMixMode === 'hourly';
+    }
+
+    function tokenFlowRows(summary) {
+      const source = tokenResolution === 'daily' ? dailyRowsWithModels(summary) : currentGlobalTimeline();
+      return timelineRowsInRange(aggregateTimelineRows(source, tokenResolution));
+    }
+
+    function projectTimelineRows(project) {
+      if (!project) return [];
+      return aggregateTimelineRows(projectTimelineCache.get(projectTimelineKey(project)) || [], projectResolution);
+    }
+
+    function periodLabel(name) {
+      if (name.length === 10) return name;
+      const date = new Date(name);
+      return Number.isNaN(date.getTime()) ? name : date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     }
 
     function renderDailyRangeControls() {
@@ -933,11 +1228,19 @@
         const value = button.dataset.rangeDays === 'all' ? Infinity : Number(button.dataset.rangeDays);
         button.classList.toggle('active', value === dailyRangeDays);
       });
+      document.querySelectorAll('#token-resolution-controls [data-token-resolution]').forEach(button => {
+        button.classList.toggle('active', button.dataset.tokenResolution === tokenResolution);
+      });
     }
 
     function costMixRows(summary) {
-      const source = summary[costMixMode] || [];
-      return [...source].sort((a, b) => (b.costUsd || 0) - (a.costUsd || 0)).slice(0, 15);
+      if (costMixMode === '15m' || costMixMode === 'hourly') {
+        return timelineRowsInRange(aggregateTimelineRows(currentGlobalTimeline(), costMixMode));
+      }
+      if (costMixMode === 'daily') {
+        return timelineRowsInRange(dailyRowsWithModels(summary));
+      }
+      return summary[costMixMode] || [];
     }
 
     function renderCostMixControls() {
@@ -1135,6 +1438,7 @@
     function renderCostMix(summary) {
       renderCostMixControls();
       const rows = costMixRows(summary);
+      const intervalMs = costMixMode === '15m' ? 900_000 : costMixMode === 'hourly' ? 3_600_000 : costMixMode === 'daily' ? 86_400_000 : null;
       renderSharedMixChart(costChart, rows, {
         key: 'cost-' + costMixMode,
         emptyText: 'No cost data',
@@ -1144,9 +1448,11 @@
         axisText: value => formatUsdCompact(value),
         scale: moneyScale,
         mix: costMix,
-        title: row => row.name,
-        displayTitle: row => row.name,
-        xLabel: row => row.name,
+        title: row => periodLabel(row.name),
+        displayTitle: row => periodLabel(row.name),
+        xLabel: row => periodLabel(row.name),
+        showModels: Boolean(intervalMs),
+        intervalMs,
       });
     }
 
@@ -1245,6 +1551,15 @@
 
     function render(summary) {
       cachedSummary = summary;
+      timelineGeneration += 1;
+      globalTimelineCache.clear();
+      globalTimelineRequests.clear();
+      projectTimelineCache.clear();
+      projectTimelineRequests.clear();
+      if (configurationState && summary.configurationRevision === configurationState.revision && !summary.pricingStale) {
+        configurationRequiresSync = false;
+      }
+      if (configurationState) renderConfigurationStatus();
       const updated = document.getElementById('updated');
       updated.textContent = 'Updated just now';
       updated.title = new Date(summary.generatedAt).toLocaleString();
@@ -1257,17 +1572,89 @@
       ].join('');
       renderRecommendations(summary);
       renderDailyRangeControls();
-      renderDailyTokenChart(dailyRowsInRange(summary.daily));
+      renderDailyTokenChart(tokenFlowRows(summary));
       renderCostMix(summary);
       renderModelAnalysis(summary);
       renderProjectSelector(summary);
       renderProjectDailyChart(selectedProjectFromSummary(summary));
+      if (usesIntradayGlobalTimeline()) loadGlobalTimelineViews();
+      if (dashboardMode === 'analyst') loadSelectedProjectTimeline();
     }
 
     const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
     let syncPollGeneration = 0;
     let syncEventSource = null;
     let syncAvailable = false;
+
+    async function fetchTimeline({ project, days } = {}) {
+      const params = new URLSearchParams();
+      if (project) params.set('project', project);
+      if (Number.isFinite(days)) params.set('days', String(days));
+      const response = await fetch('/api/timeline' + (params.size ? '?' + params.toString() : ''), { cache: 'no-store' });
+      if (!response.ok) throw new Error('Timeline request failed: HTTP ' + response.status);
+      return response.json();
+    }
+
+    async function ensureGlobalTimeline() {
+      const key = globalTimelineKey();
+      if (globalTimelineCache.has(key)) return globalTimelineCache.get(key);
+      if (globalTimelineRequests.has(key)) return globalTimelineRequests.get(key);
+      const request = fetchTimeline({ days: dailyRangeDays }).then(rows => {
+        globalTimelineCache.set(key, rows);
+        return rows;
+      });
+      globalTimelineRequests.set(key, request);
+      try {
+        return await request;
+      } finally {
+        if (globalTimelineRequests.get(key) === request) globalTimelineRequests.delete(key);
+      }
+    }
+
+    async function loadGlobalTimelineViews() {
+      try {
+        await ensureGlobalTimeline();
+        if (!cachedSummary) return;
+        renderDailyTokenChart(tokenFlowRows(cachedSummary));
+        renderCostMix(cachedSummary);
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    async function ensureProjectTimeline(project) {
+      if (!project) return [];
+      const key = projectTimelineKey(project);
+      if (projectTimelineCache.has(key)) return projectTimelineCache.get(key);
+      if (projectTimelineRequests.has(key)) return projectTimelineRequests.get(key);
+      const request = fetchTimeline({ project: project.name }).then(rows => {
+        projectTimelineCache.set(key, rows);
+        return rows;
+      });
+      projectTimelineRequests.set(key, request);
+      try {
+        return await request;
+      } finally {
+        if (projectTimelineRequests.get(key) === request) projectTimelineRequests.delete(key);
+      }
+    }
+
+    async function loadSelectedProjectTimeline() {
+      const project = selectedProjectFromSummary(cachedSummary);
+      if (!project) return;
+      const expectedName = project.name;
+      const request = ensureProjectTimeline(project);
+      renderProjectDailyChart(project);
+      try {
+        await request;
+        const selected = selectedProjectFromSummary(cachedSummary);
+        if (selected?.name === expectedName) renderProjectDailyChart(selected);
+      } catch (error) {
+        console.error(error);
+        const selected = selectedProjectFromSummary(cachedSummary);
+        if (selected?.name === expectedName) renderProjectDailyChart(selected);
+      }
+    }
 
     async function loadSummary() {
       const response = await fetch('/api/summary', { cache: 'no-store' });
@@ -1309,6 +1696,113 @@
         updated.textContent = 'Synced ' + (result.changedSources || 0) + ' changed · ' +
           (result.skippedSources || 0) + ' skipped · ' + formatDuration(result.durationMs || 0);
         updated.title = sync.finishedAt ? new Date(sync.finishedAt).toLocaleString() : '';
+      }
+    }
+
+    function priceInput(field, value, className = '') {
+      const numeric = ['input', 'cacheCreate5m', 'cacheCreate30m', 'cacheCreate1h', 'cacheRead', 'output'].includes(field);
+      const type = numeric ? 'number' : 'text';
+      const attrs = numeric ? ' min="0" step="any" inputmode="decimal"' : '';
+      return '<input class="' + esc(className) + '" data-price-field="' + esc(field) + '" type="' + type + '"' + attrs + ' value="' + esc(value ?? '') + '">';
+    }
+
+    function renderConfigurationStatus(message = null, failed = false) {
+      const status = document.getElementById('configuration-status');
+      if (!status) return;
+      status.classList.toggle('stale', configurationRequiresSync || failed);
+      if (message) {
+        status.textContent = message;
+        return;
+      }
+      if (!configurationState) {
+        status.textContent = 'Configuration unavailable';
+        return;
+      }
+      const basis = configurationState.settings.pricingBasis === 'custom' ? 'Custom pricing' : 'Standard API equivalent';
+      status.textContent = basis + ' · revision ' + configurationState.revision +
+        (configurationRequiresSync ? ' · Sync required to apply changes' : ' · Applied');
+    }
+
+    function renderPricingEditor() {
+      if (!configurationState) return;
+      document.getElementById('setting-openai-context').value = configurationState.settings.openaiContext;
+      document.getElementById('setting-pricing-basis').value = configurationState.settings.pricingBasis;
+      document.getElementById('setting-regional-multiplier').value = configurationState.settings.regionalMultiplier;
+      const table = document.getElementById('pricing-table');
+      table.innerHTML =
+        '<thead><tr><th>Provider</th><th>Model</th><th>Match</th><th>Variant</th><th>Effective from</th><th>Effective until</th><th>Input</th><th>Cache 5m write</th><th>Cache 30m write</th><th>Cache 1h write</th><th>Cache read</th><th>Output</th><th>Source</th><th></th></tr></thead>' +
+        '<tbody>' + configurationState.prices.map((row, index) => (
+          '<tr data-price-index="' + index + '">' +
+          '<td>' + priceInput('provider', row.provider) + '</td>' +
+          '<td>' + priceInput('model', row.model, 'price-model') + '</td>' +
+          '<td><select data-price-field="matchMode">' + ['exact', 'prefix', 'snapshot'].map(value => '<option value="' + value + '"' + (row.matchMode === value ? ' selected' : '') + '>' + value + '</option>').join('') + '</select></td>' +
+          '<td><select data-price-field="variant">' + ['standard', 'short', 'long'].map(value => '<option value="' + value + '"' + (row.variant === value ? ' selected' : '') + '>' + value + '</option>').join('') + '</select></td>' +
+          '<td>' + priceInput('effectiveFrom', row.effectiveFrom) + '</td>' +
+          '<td>' + priceInput('effectiveUntil', row.effectiveUntil) + '</td>' +
+          '<td>' + priceInput('input', row.input, 'price-number') + '</td>' +
+          '<td>' + priceInput('cacheCreate5m', row.cacheCreate5m, 'price-number') + '</td>' +
+          '<td>' + priceInput('cacheCreate30m', row.cacheCreate30m, 'price-number') + '</td>' +
+          '<td>' + priceInput('cacheCreate1h', row.cacheCreate1h, 'price-number') + '</td>' +
+          '<td>' + priceInput('cacheRead', row.cacheRead, 'price-number') + '</td>' +
+          '<td>' + priceInput('output', row.output, 'price-number') + '</td>' +
+          '<td>' + priceInput('sourceUrl', row.sourceUrl, 'price-source') + '</td>' +
+          '<td><button class="icon-button" type="button" data-remove-price="' + index + '" title="Remove price row" aria-label="Remove price row">×</button></td></tr>'
+        )).join('') + '</tbody>';
+      renderConfigurationStatus();
+    }
+
+    function configurationFromEditor() {
+      const prices = [...document.querySelectorAll('#pricing-table tbody tr')].map(row => {
+        const result = {};
+        row.querySelectorAll('[data-price-field]').forEach(input => {
+          const field = input.dataset.priceField;
+          const raw = input.value.trim();
+          result[field] = ['input', 'cacheCreate5m', 'cacheCreate30m', 'cacheCreate1h', 'cacheRead', 'output'].includes(field)
+            ? (raw === '' ? null : Number(raw))
+            : (raw === '' ? null : raw);
+        });
+        return result;
+      });
+      return {
+        revision: configurationState.revision,
+        settings: {
+          openaiContext: document.getElementById('setting-openai-context').value,
+          pricingBasis: document.getElementById('setting-pricing-basis').value,
+          regionalMultiplier: Number(document.getElementById('setting-regional-multiplier').value),
+        },
+        prices,
+      };
+    }
+
+    async function loadConfigurationEditor() {
+      const response = await fetch('/api/configuration', { cache: 'no-store' });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || 'Configuration request failed: HTTP ' + response.status);
+      configurationState = body.configuration;
+      configurationRequiresSync = Boolean(body.requiresSync);
+      renderPricingEditor();
+    }
+
+    async function savePricingEditor() {
+      const button = document.getElementById('save-pricing');
+      button.disabled = true;
+      renderConfigurationStatus('Saving configuration...');
+      try {
+        const response = await fetch('/api/configuration', {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json', 'x-tokenomics-action': 'configuration' },
+          body: JSON.stringify(configurationFromEditor()),
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || 'Configuration save failed: HTTP ' + response.status);
+        configurationState = body.configuration;
+        configurationRequiresSync = true;
+        renderPricingEditor();
+      } catch (error) {
+        renderConfigurationStatus(error.message, true);
+        console.error(error);
+      } finally {
+        button.disabled = false;
       }
     }
 
@@ -1434,7 +1928,7 @@
     }
 
     async function initializeDashboard() {
-      const [, sync] = await Promise.all([loadSummary(), fetchSyncStatus()]);
+      const [, sync] = await Promise.all([loadSummary(), fetchSyncStatus(), loadConfigurationEditor()]);
       renderSyncStatus(sync);
       if (sync.state === 'running') watchSyncStatus();
     }
@@ -1443,7 +1937,36 @@
       const mode = event.target?.dataset?.mixMode;
       if (!mode) return;
       costMixMode = mode;
-      if (cachedSummary) renderCostMix(cachedSummary);
+      if (!cachedSummary) return;
+      renderCostMix(cachedSummary);
+      if (mode === '15m' || mode === 'hourly') loadGlobalTimelineViews();
+    });
+    document.getElementById('token-resolution-controls').addEventListener('click', event => {
+      const resolution = event.target?.dataset?.tokenResolution;
+      if (!['15m', 'hourly', 'daily'].includes(resolution) || resolution === tokenResolution) return;
+      tokenResolution = resolution;
+      dailyTokenChart.zoom.start = 0;
+      dailyTokenChart.zoom.end = 0;
+      dailyTokenChart.hoverIndex = null;
+      dailyTokenChart.pinnedIndex = null;
+      if (cachedSummary) {
+        renderDailyRangeControls();
+        renderDailyTokenChart(tokenFlowRows(cachedSummary));
+        if (tokenResolution !== 'daily') loadGlobalTimelineViews();
+      }
+    });
+    document.getElementById('project-resolution-controls').addEventListener('click', event => {
+      const resolution = event.target?.dataset?.projectResolution;
+      if (!['15m', 'hourly', 'daily'].includes(resolution) || resolution === projectResolution) return;
+      projectResolution = resolution;
+      projectChart.zoom.start = 0;
+      projectChart.zoom.end = 0;
+      projectChart.hoverIndex = null;
+      projectChart.pinnedIndex = null;
+      if (cachedSummary) {
+        renderProjectDailyChart(selectedProjectFromSummary(cachedSummary));
+        loadSelectedProjectTimeline();
+      }
     });
     document.getElementById('daily-range-controls').addEventListener('click', event => {
       const raw = event.target?.dataset?.rangeDays;
@@ -1454,7 +1977,9 @@
       dailyTokenChart.hoverIndex = null;
       if (cachedSummary) {
         renderDailyRangeControls();
-        renderDailyTokenChart(dailyRowsInRange(cachedSummary.daily));
+        renderDailyTokenChart(tokenFlowRows(cachedSummary));
+        renderCostMix(cachedSummary);
+        if (usesIntradayGlobalTimeline()) loadGlobalTimelineViews();
       }
     });
     document.getElementById('model-date-mode-controls').addEventListener('click', event => {
@@ -1484,6 +2009,38 @@
     document.getElementById('sync-dashboard').addEventListener('click', () => {
       startSync();
     });
+    document.getElementById('save-pricing').addEventListener('click', () => {
+      savePricingEditor();
+    });
+    document.getElementById('add-price').addEventListener('click', () => {
+      if (!configurationState) return;
+      configurationState = configurationFromEditor();
+      configurationState.settings.pricingBasis = 'custom';
+      configurationState.prices.push({
+        provider: 'new-provider',
+        model: 'new-model',
+        matchMode: 'exact',
+        variant: 'standard',
+        effectiveFrom: null,
+        effectiveUntil: null,
+        input: 0,
+        cacheCreate5m: null,
+        cacheCreate30m: null,
+        cacheCreate1h: null,
+        cacheRead: null,
+        output: 0,
+        sourceUrl: '',
+      });
+      renderPricingEditor();
+      document.querySelector('#pricing-table tbody tr:last-child')?.scrollIntoView({ block: 'nearest' });
+    });
+    document.getElementById('pricing-table').addEventListener('click', event => {
+      const index = Number(event.target?.dataset?.removePrice);
+      if (!Number.isInteger(index) || !configurationState) return;
+      configurationState = configurationFromEditor();
+      configurationState.prices.splice(index, 1);
+      renderPricingEditor();
+    });
     document.getElementById('dashboard-mode-controls').addEventListener('click', event => {
       const mode = event.target?.dataset?.dashboardMode;
       if (!['overview', 'analyst'].includes(mode) || mode === dashboardMode) return;
@@ -1492,11 +2049,18 @@
     });
     let activeSectionTarget = 'overview-section';
     function syncSectionNav() {
-      const analysisTop = document.getElementById('models-section').getBoundingClientRect().top;
-      const efficiencyTop = document.getElementById('efficiency-section').getBoundingClientRect().top;
-      if (window.scrollY < 80) activeSectionTarget = 'overview-section';
-      else if (efficiencyTop <= 120) activeSectionTarget = 'efficiency-section';
-      else if (analysisTop <= 120 && !['models-section', 'projects-section'].includes(activeSectionTarget)) activeSectionTarget = 'models-section';
+      const threshold = document.getElementById('app-header').getBoundingClientRect().height + 24;
+      const orderedTargets = ['overview-section', 'projects-section', 'models-section', 'pricing-settings', 'efficiency-section'];
+      if (window.scrollY < 80) {
+        activeSectionTarget = 'overview-section';
+      } else {
+        for (const targetId of orderedTargets) {
+          const section = document.getElementById(targetId);
+          if (section && getComputedStyle(section).display !== 'none' && section.getBoundingClientRect().top <= threshold) {
+            activeSectionTarget = targetId;
+          }
+        }
+      }
       document.querySelectorAll('#section-nav [data-section-target]').forEach(button => {
         button.classList.toggle('active', button.dataset.sectionTarget === activeSectionTarget);
       });
@@ -1515,12 +2079,15 @@
       projectChart.pinnedIndex = null;
       projectChart.zoom.start = 0;
       projectChart.zoom.end = 0;
-      if (cachedSummary) renderProjectDailyChart(selectedProjectFromSummary(cachedSummary));
+      if (cachedSummary) {
+        renderProjectDailyChart(selectedProjectFromSummary(cachedSummary));
+        loadSelectedProjectTimeline();
+      }
     });
     bindSharedMixCanvas(dailyTokenChart);
     bindSharedMixCanvas(costChart);
     bindSharedMixCanvas(projectChart);
-    new ResizeObserver(() => { if (cachedSummary) renderDailyTokenChart(dailyRowsInRange(cachedSummary.daily)); }).observe(document.getElementById('daily-token-canvas'));
+    new ResizeObserver(() => { if (cachedSummary) renderDailyTokenChart(tokenFlowRows(cachedSummary)); }).observe(document.getElementById('daily-token-canvas'));
     new ResizeObserver(() => { if (cachedSummary) renderCostMix(cachedSummary); }).observe(document.getElementById('cost-mix-canvas'));
     new ResizeObserver(() => { if (cachedSummary) renderProjectDailyChart(selectedProjectFromSummary(cachedSummary)); }).observe(document.getElementById('project-cost-canvas'));
     applyDashboardMode({ persist: false });

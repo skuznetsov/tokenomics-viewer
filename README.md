@@ -1,7 +1,7 @@
 # Tokenomics Viewer
 
 Tokenomics Viewer scans local Codex and Claude Code session logs, normalizes
-token usage, estimates costs from static pricing tables, and reports the results
+token usage, estimates costs from a database-backed pricing catalog, and reports the results
 as text, JSON, SQLite-backed data, or a local web dashboard.
 
 The tool is local-first. It reads files from your machine and does not upload
@@ -298,15 +298,25 @@ not require a reset.
 
 - `/` dashboard HTML
 - `/api/summary`
+- `/api/timeline` compact 15-minute data loaded on demand for a range or project
 - `/api/sessions`
 - `/api/report`
 - `/api/sync` sync status and protected start action
 - `/api/sync/events` live sync progress over server-sent events
 
-The dashboard shows canvas-based daily token-flow, cost-mix, and per-project
-daily cost charts with accumulated mouse-wheel zoom and drag selection. Small
-trackpad deltas are accumulated before changing the visible range. Hover labels
-use the same `tokens / $amount / percent` format for input, cache, and output.
+The dashboard shows canvas-based token-flow, cost-mix, and per-project cost
+charts at 15-minute, hourly, and daily resolution; Cost Mix also retains weekly
+and monthly views. Intraday rows are loaded separately from the summary and a
+project timeline is fetched only for the selected project. Accumulated
+mouse-wheel zoom follows the pointer, drag selects a range, and zoom can reach a
+single 15-minute bucket. Small trackpad deltas are accumulated before changing
+the visible range.
+
+Each model is drawn as a stable-color point and Catmull-Rom line. A missing model
+interval creates a visible break instead of implying zero or interpolated use.
+Hover labels keep aggregate input/cache/output in the header and show each
+model's `cost / tokens / percent` for the selected interval. Project intervals
+can be pinned by click.
 
 Analyst mode includes `Cost & Resource Diagnostics`. It reuses the Models date
 range and compares effort rows only within one selected provider/model cohort.
@@ -338,9 +348,32 @@ authentication.
 
 ## Pricing
 
-Pricing is a static table in `lib/core/pricing.js`. Treat estimates as audit aids, not
-billing truth. Verify current provider pricing before relying on the numbers for
-financial decisions.
+The first database open seeds a packaged pricing catalog from
+`lib/core/pricing.js`. After that, the active catalog and analytics settings are
+stored in the selected SQLite or ClickHouse database. Treat estimates as audit
+aids, not billing truth. Verify current provider pricing before relying on the
+numbers for financial decisions.
+
+Open the dashboard in **Analyst** mode and use **Pricing & Analytics Settings**
+to:
+
+- inspect and edit per-million-token input, cache-write, cache-read, and output
+  rates;
+- add providers and models using a provider slug and model id;
+- choose exact, prefix, or dated-snapshot model matching;
+- set OpenAI short/long context selection and a global rate multiplier.
+
+Configuration saves use an optimistic revision and are allowed only on a
+loopback-bound dashboard. Saving publishes the new catalog but does not silently
+rewrite stored history. The dashboard shows **Sync required** until the next
+Sync reprocesses unchanged source files with the new pricing revision. A failed
+or partial sync leaves the report marked stale.
+
+Custom providers are priced when an ingested record identifies the same provider
+slug. Adding a catalog row cannot infer a provider that is absent from the source
+log. `standard` means the displayed values are standard API-equivalent estimates;
+switch the basis to `custom` when entering negotiated, batch, subscription, or
+otherwise non-standard rates.
 
 GPT-5.6 Sol, Terra, and Luna use separate input, 30-minute cache-write, and
 cache-read prices. Codex logs are interpreted conservatively: the legacy
@@ -350,6 +383,10 @@ subset of input (read only), while the explicit
 30-minute cache write separately. A legacy log cannot prove a cache-write
 quantity, so the estimate leaves that bucket at zero instead of inferring it
 from input. Source: <https://developers.openai.com/api/docs/models/gpt-5.6-sol>.
+
+The proposed compressed session store and project-scoped session viewer are not
+implemented in this slice. Their admitted safety boundary is documented in
+[`docs/PRICING_CONFIGURATION_FRONTIER.md`](docs/PRICING_CONFIGURATION_FRONTIER.md).
 
 ## Privacy
 

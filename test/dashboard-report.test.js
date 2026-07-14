@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { dashboardHtml, webSummary } = require("../lib/dashboard");
+const { dashboardHtml, webSummary, webTimeline } = require("../lib/dashboard");
 const { newReport } = require("../app");
 const { defaultOptions, statsFixture } = require("./support/fixtures");
 
@@ -15,6 +15,38 @@ test("dashboard summary keeps daily buckets chronological for time-series charts
   const summary = webSummary(report, defaultOptions());
 
   assert.deepEqual(summary.daily.map((row) => row.name), ["2026-01-01", "2026-01-02", "2026-01-03"]);
+});
+
+test("dashboard serves compact 15-minute timelines separately from the summary", () => {
+  const report = newReport();
+  report.quarterHourly["2026-01-02T12:00Z"] = statsFixture({ costUsd: 3 });
+  report.quarterHourly["2026-01-01T12:15Z"] = statsFixture({ costUsd: 2 });
+  report.quarterHourly["2026-01-01T12:00Z"] = statsFixture({ costUsd: 1 });
+  report.quarterHourlyProviderModels["2026-01-01T12:00Z"] = {
+    openai: { "shared-model": statsFixture({ input: 10, costUsd: 1 }) },
+  };
+  report.projects["/tmp/project-a"] = statsFixture({ costUsd: 3 });
+  report.projectQuarterHourly["/tmp/project-a"] = {
+    "2026-01-01T12:15Z": statsFixture({ costUsd: 2 }),
+    "2026-01-01T12:00Z": statsFixture({ costUsd: 1 }),
+  };
+  report.projectQuarterHourlyProviderModels["/tmp/project-a"] = {
+    "2026-01-01T12:00Z": { openai: { "shared-model": statsFixture({ input: 10, costUsd: 1 }) } },
+  };
+
+  const summary = webSummary(report, defaultOptions());
+  const globalTimeline = webTimeline(report);
+  const recentTimeline = webTimeline(report, { days: 1 });
+  const projectTimeline = webTimeline(report, { project: "/tmp/project-a" });
+
+  assert.equal(summary.timeline, undefined);
+  assert.equal(summary.projectDaily[0].timeline, undefined);
+  assert.deepEqual(globalTimeline.map((row) => row.name), ["2026-01-01T12:00Z", "2026-01-01T12:15Z", "2026-01-02T12:00Z"]);
+  assert.equal(globalTimeline[0].models[0].name, "openai/shared-model");
+  assert.deepEqual(recentTimeline.map((row) => row.name), ["2026-01-02T12:00Z"]);
+  assert.deepEqual(projectTimeline.map((row) => row.name), ["2026-01-01T12:00Z", "2026-01-01T12:15Z"]);
+  assert.equal(projectTimeline[0].models[0].name, "openai/shared-model");
+  assert.deepEqual(Object.keys(globalTimeline[0]).sort(), ["cacheCreate1h", "cacheCreate30m", "cacheCreate5m", "cacheRead", "costUsd", "costsUsd", "input", "models", "name", "output", "pricedRequests", "requests"]);
 });
 
 test("dashboard summary exposes chronological provider, model, and effort daily groups", () => {
@@ -99,11 +131,22 @@ test("dashboard summary exposes per-project daily buckets for the project select
   report.projectDaily["/tmp/project-b"] = {
     "2026-01-03": statsFixture({ input: 120, cacheRead: 40, output: 10, costUsd: 12 }),
   };
+  report.projectProviderModels["/tmp/project-a"] = {
+    openai: {
+      "shared-model": statsFixture({ requests: 2, pricedRequests: 2, costUsd: 4 }),
+    },
+    "acme-ai": {
+      "shared-model": statsFixture({ requests: 1, unpricedRequests: 1, costUsd: 1 }),
+    },
+  };
 
   const summary = webSummary(report, defaultOptions({ top: 10 }));
 
   assert.deepEqual(summary.projectDaily.map((project) => project.name), ["/tmp/project-b", "/tmp/project-a"]);
   assert.deepEqual(summary.projectDaily[1].daily.map((row) => row.name), ["2026-01-01", "2026-01-02"]);
+  assert.deepEqual(summary.projectDaily[1].models.map((row) => row.name), ["openai/shared-model", "acme-ai/shared-model"]);
+  assert.deepEqual(summary.projectDaily[1].models.map((row) => row.provider), ["openai", "acme-ai"]);
+  assert.equal(summary.projectDaily[1].models[1].unpricedRequests, 1);
 });
 
 test("dashboard html renders daily and cost mix with the shared canvas chart", () => {
@@ -168,6 +211,10 @@ test("dashboard html replaces sessions with a zoomable project canvas", () => {
   assert.match(html, /row\.name === 'Total'/);
   assert.match(html, /chart\.pinnedIndex =/);
   assert.match(html, /segmentShareText/);
+  assert.match(html, /Tariff coverage/);
+  assert.match(html, /Cache write/);
+  assert.match(html, /Cache read/);
+  assert.match(html, /project-model-breakdown/);
   assert.match(html, /tokens \/ /);
   assert.match(html, /Cost Mix/);
   assert.match(html, /data-mix-mode="daily"/);
@@ -179,6 +226,16 @@ test("dashboard html replaces sessions with a zoomable project canvas", () => {
   assert.doesNotMatch(costMixRenderer, /costMixMode === 'models'/);
   assert.doesNotMatch(html, /<h2>Sessions<\/h2>/);
   assert.doesNotMatch(html, /fetch\('\/api\/sessions'\)/);
+});
+
+test("dashboard exposes a database-backed pricing settings editor", () => {
+  const html = dashboardHtml();
+
+  assert.match(html, /id="pricing-settings"/);
+  assert.match(html, /id="pricing-table"/);
+  assert.match(html, /id="save-pricing"/);
+  assert.match(html, /\/api\/configuration/);
+  assert.match(html, /x-tokenomics-action/);
 });
 
 test("dashboard html exposes a standalone models table and relative and absolute date filters", () => {
@@ -197,6 +254,15 @@ test("dashboard html exposes a standalone models table and relative and absolute
   assert.doesNotMatch(html, /formatTokenCount\(segmentTokens\(row, key\)\)\) \+ ' tokens'/);
 
   assert.match(html, /id="daily-range-controls"[\s\S]*data-range-days="all"/);
+  assert.match(html, /id="token-resolution-controls"[\s\S]*data-token-resolution="15m"/);
+  assert.match(html, /id="project-resolution-controls"[\s\S]*data-project-resolution="hourly"/);
+  assert.match(html, /data-mix-mode="15m"/);
+  assert.match(html, /aggregateTimelineRows/);
+  assert.match(html, /Math\.min\(1, count\)/);
+  assert.match(html, /drawSharedModelSeries/);
+  assert.match(html, /className = 'chart-tooltip'/);
+  assert.match(html, /modelColor/);
+  assert.match(html, /currentTime - previousTime > config\.intervalMs/);
   const dateInputs = html.match(/<input\b[^>]*type=["']date["'][^>]*>/g) || [];
   assert.ok(dateInputs.length >= 2, "expected absolute start and end date controls");
 });

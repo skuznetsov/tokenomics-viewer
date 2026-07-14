@@ -16,6 +16,7 @@
     "app.js",
     "install.sh",
     "launcher.js",
+    "docs/",
     "lib/",
     "public/",
     "README.md",
