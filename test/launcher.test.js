@@ -1,17 +1,61 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs/promises");
+const Os = require("node:os");
 const Path = require("node:path");
 const test = require("node:test");
 const {
   browserCommand,
+  downloadClickHouseInstaller,
   ensureClickHouse,
+  findExecutable,
   launcherAppArgs,
   launcherDataPath,
   parseLauncherArgs,
   runLauncher,
   waitForDashboardProcess,
 } = require("../lib/launcher");
+
+test("ClickHouse installer requests the shell payload and rejects HTML", async () => {
+  let requestOptions = null;
+  const shellScript = await downloadClickHouseInstaller(async (_url, options) => {
+    requestOptions = options;
+    return {
+      ok: true,
+      status: 200,
+      url: "https://clickhouse.com/cli",
+      headers: { get: (name) => name === "content-type" ? "text/plain; charset=utf-8" : null },
+      text: async () => "#!/bin/sh\nset -eu\n",
+    };
+  });
+
+  assert.equal(shellScript, "#!/bin/sh\nset -eu\n");
+  assert.match(requestOptions.headers["user-agent"], /^curl\//);
+  assert.equal(requestOptions.headers.accept, "text/plain");
+
+  await assert.rejects(
+    downloadClickHouseInstaller(async () => ({
+      ok: true,
+      status: 200,
+      url: "https://clickhouse.com/docs/interfaces/cli",
+      headers: { get: () => "text/html; charset=utf-8" },
+      text: async () => "<!doctype html><title>ClickHouse CLI</title>",
+    })),
+    /returned HTML instead of a shell script/,
+  );
+});
+
+test("launcher finds an installed chctl even when ~/.local/bin is absent from PATH", async (t) => {
+  const temporary = await fs.mkdtemp(Path.join(Os.tmpdir(), "tokenomics-launcher-path-"));
+  t.after(() => fs.rm(temporary, { recursive: true, force: true }));
+  const localBin = Path.join(temporary, ".local", "bin");
+  const executable = Path.join(localBin, "chctl");
+  await fs.mkdir(localBin, { recursive: true });
+  await fs.writeFile(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+  assert.equal(await findExecutable("chctl", { PATH: "/usr/bin:/bin" }, temporary), executable);
+});
 
 test("browser command uses the platform default opener", () => {
   const url = "http://127.0.0.1:8787";
