@@ -185,7 +185,7 @@
             <button class="seg-button" type="button" data-timeline-date-mode="absolute" aria-pressed="false">Absolute</button>
           </div>
           <select class="date-input" id="token-relative-range" aria-label="Token Flow relative date range">
-            <option value="30">1M</option><option value="90" selected>3M</option><option value="180">6M</option><option value="365">1Y</option><option value="all">All</option>
+            <option value="30" selected>1M</option><option value="90">3M</option><option value="180">6M</option><option value="365">1Y</option><option value="all">All</option>
           </select>
           <div class="date-control-group is-hidden" id="token-absolute-range">
             <label class="date-label">From <input class="date-input" id="token-date-from" type="date"></label>
@@ -213,7 +213,7 @@
                 <button class="seg-button" type="button" data-timeline-date-mode="absolute" aria-pressed="false">Absolute</button>
               </div>
               <select class="date-input" id="project-relative-range" aria-label="Project Cost relative date range">
-                <option value="30">1M</option><option value="90" selected>3M</option><option value="180">6M</option><option value="365">1Y</option><option value="all">All</option>
+                <option value="30" selected>1M</option><option value="90">3M</option><option value="180">6M</option><option value="365">1Y</option><option value="all">All</option>
               </select>
               <div class="date-control-group is-hidden" id="project-absolute-range">
                 <label class="date-label">From <input class="date-input" id="project-date-from" type="date"></label>
@@ -1100,8 +1100,8 @@
     const projectTimelineCache = new Map();
     const projectTimelineRequests = new Map();
     const timelineRanges = {
-      token: { mode: 'relative', days: 90, from: '', to: '' },
-      project: { mode: 'relative', days: 90, from: '', to: '' },
+      token: { mode: 'relative', days: 30, from: '', to: '' },
+      project: { mode: 'relative', days: 30, from: '', to: '' },
     };
     let modelDateMode = 'relative';
     let modelRelativeDays = Infinity;
@@ -1216,25 +1216,15 @@
     }
 
     function timelineRangeDomain(range) {
-      const from = range.mode === 'absolute'
-        ? range.from
-        : (Number.isFinite(range.days) && range.availableTo
-          ? new Date(Date.parse(range.availableTo + 'T00:00:00Z') - (range.days - 1) * TokenomicsTimeline.DAY_MS).toISOString().slice(0, 10)
-          : range.availableFrom);
-      const to = range.mode === 'absolute' ? range.to : range.availableTo;
-      if (!from || !to) return null;
-      return {
-        start: Date.parse(from + 'T00:00:00Z'),
-        end: Date.parse(to + 'T00:00:00Z') + TokenomicsTimeline.DAY_MS,
-      };
+      return TokenomicsTimeline.rangeDomain(range);
     }
 
     function visibleDomainLabel(domain, resolution) {
       const start = new Date(domain.start);
       const end = new Date(domain.end - 1);
       const options = resolution === '15m' || resolution === 'hourly'
-        ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
-        : { year: 'numeric', month: 'short', day: 'numeric' };
+        ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }
+        : { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' };
       return start.toLocaleString([], options) + ' - ' + end.toLocaleString([], options);
     }
 

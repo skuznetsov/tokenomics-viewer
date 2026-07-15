@@ -80,6 +80,26 @@
     return Date.parse(name);
   }
 
+  function rangeDomain(range = {}) {
+    let start;
+    let end;
+    if (range.mode === "absolute") {
+      start = periodStart(range.from);
+      end = periodStart(range.to) + DAY_MS;
+    } else {
+      const availableStart = periodStart(range.availableFrom);
+      const availableEnd = periodStart(range.availableTo);
+      if (!Number.isFinite(availableEnd)) return null;
+      start = Number.isFinite(range.days)
+        ? availableEnd - (range.days - 1) * DAY_MS
+        : availableStart;
+      if (Number.isFinite(availableStart)) start = Math.max(start, availableStart);
+      end = availableEnd + DAY_MS;
+    }
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) return null;
+    return { start, end };
+  }
+
   function bucketName(name, resolution) {
     if (resolution === "15m") return name;
     if (resolution === "hourly") return `${name.slice(0, 13)}:00Z`;
@@ -167,6 +187,7 @@
     nearestPointByX,
     periodStart,
     panDomain,
+    rangeDomain,
     rememberBounded,
     resolutionIntervalMs,
     selectDomain,

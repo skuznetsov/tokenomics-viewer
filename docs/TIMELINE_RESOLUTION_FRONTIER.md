@@ -11,7 +11,8 @@ Current frontier: range-bounded timelines with adaptive resolution
   without repricing or averaging rates.
 - Token Flow and Project Cost each expose an independent `Relative | Absolute`
   date range. Relative ranges are anchored to the latest measured row;
-  absolute bounds are inclusive UTC calendar dates.
+  absolute bounds are inclusive UTC calendar dates. Both charts default to a
+  one-month relative range.
 - Wheel and selection zoom operate only inside the selected date range. The
   visible domain automatically selects monthly, daily, hourly, or 15-minute
   buckets to keep the chart readable while preserving 15-minute drill-down.
@@ -57,12 +58,15 @@ Current frontier: range-bounded timelines with adaptive resolution
    indexes are not stable across bucket widths.
 4. Adaptive resolution selects the finest bucket that stays within the chart's
    point budget; the minimum domain is one 15-minute bucket.
-5. A one-point view is valid and must not divide by zero or resize the canvas.
-6. Sparse usage is not zero usage: model lines must break instead of connecting
+5. A relative range is intersected with the measured data bounds. A project
+   with one measured day starts with a one-day domain and 15-minute buckets,
+   never a mostly empty month-long domain with one daily point.
+6. A one-point view is valid and must not divide by zero or resize the canvas.
+7. Sparse usage is not zero usage: model lines must break instead of connecting
    across an interval where that model has no row.
-7. Intraday payload is demand-driven. The initial summary must not include every
+8. Intraday payload is demand-driven. The initial summary must not include every
    project timeline.
-8. Range caching is bounded independently for global and project timelines;
+9. Range caching is bounded independently for global and project timelines;
    cache eviction may cost another request but must not change chart totals.
 
 ## Falsifiers
@@ -76,6 +80,8 @@ Current frontier: range-bounded timelines with adaptive resolution
 - A 90-day domain renders daily buckets, a five-day domain renders hourly
   buckets, and a one-day domain renders 15-minute buckets at the standard point
   budget.
+- A 30-day relative selection over a project with only one measured day clamps
+  to that day and starts at 15-minute resolution.
 - Wheel anchoring preserves the timestamp under the pointer, never exceeds the
   selected range, and can reach one 15-minute interval.
 - Pan preserves domain width, clamps at both selected-range boundaries, and is
@@ -105,8 +111,9 @@ Current frontier: range-bounded timelines with adaptive resolution
 - Real ClickHouse payload probe on the same dataset: the former eager summary
   was 68.7 MB; the lazy summary was 4.46 MB, a 90-day global timeline 6.51 MB,
   and the selected project's all-time timeline 4.00 MB.
-- Full suite on 2026-07-14: `npm test` passed all 156 tests. The final browser
-  smoke reported zero console errors and warnings.
+- Full suite on 2026-07-14: `npm test` passed all 160 tests. The final browser
+  smoke confirmed one-month defaults and UTC-aligned range labels without
+  console errors or warnings.
 
 ## Implementation Seal
 

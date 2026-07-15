@@ -12,6 +12,33 @@ test("adaptive resolution selects the finest bucket within the point budget", ()
   assert.equal(timeline.chooseAdaptiveResolution(start, start + 3 * 365 * timeline.DAY_MS, 160), "monthly");
 });
 
+test("relative range clamps to one available day and starts at 15-minute resolution", () => {
+  const domain = timeline.rangeDomain({
+    mode: "relative",
+    days: 30,
+    availableFrom: "2026-07-14",
+    availableTo: "2026-07-14",
+  });
+
+  assert.deepEqual(domain, {
+    start: Date.parse("2026-07-14T00:00:00Z"),
+    end: Date.parse("2026-07-15T00:00:00Z"),
+  });
+  assert.equal(timeline.chooseAdaptiveResolution(domain.start, domain.end, 96), "15m");
+});
+
+test("relative range keeps the requested trailing window when enough data exists", () => {
+  const domain = timeline.rangeDomain({
+    mode: "relative",
+    days: 30,
+    availableFrom: "2026-01-01",
+    availableTo: "2026-07-14",
+  });
+
+  assert.equal(new Date(domain.start).toISOString(), "2026-06-15T00:00:00.000Z");
+  assert.equal(new Date(domain.end).toISOString(), "2026-07-15T00:00:00.000Z");
+});
+
 test("wheel zoom keeps its pointer anchor inside the selected range", () => {
   const full = { start: 0, end: 100 * timeline.DAY_MS };
   const zoomed = timeline.zoomDomain(full, full, 0.75, -1);

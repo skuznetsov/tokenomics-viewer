@@ -255,10 +255,16 @@ test("dashboard html exposes per-chart relative and absolute date filters with a
 
   assert.match(html, /id="token-date-mode-controls"/);
   assert.match(html, /id="token-relative-range"/);
+  const tokenRelativeOptions = html.match(/<select[^>]+id="token-relative-range"[^>]*>([\s\S]*?)<\/select>/)?.[1] || "";
+  assert.match(tokenRelativeOptions, /<option value="30" selected>1M<\/option>/);
   assert.match(html, /id="token-date-from"/);
   assert.match(html, /id="token-date-to"/);
   assert.match(html, /id="project-date-mode-controls"/);
   assert.match(html, /id="project-relative-range"/);
+  const projectRelativeOptions = html.match(/<select[^>]+id="project-relative-range"[^>]*>([\s\S]*?)<\/select>/)?.[1] || "";
+  assert.match(projectRelativeOptions, /<option value="30" selected>1M<\/option>/);
+  assert.match(html, /token: \{ mode: 'relative', days: 30/);
+  assert.match(html, /project: \{ mode: 'relative', days: 30/);
   assert.match(html, /id="project-date-from"/);
   assert.match(html, /id="project-date-to"/);
   assert.match(html, /id="token-interaction-controls"/);
@@ -275,6 +281,8 @@ test("dashboard html exposes per-chart relative and absolute date filters with a
   assert.match(html, /TokenomicsTimeline\.zoomDomain/);
   assert.match(html, /TokenomicsTimeline\.panDomain/);
   assert.match(html, /TokenomicsTimeline\.nearestPointByX/);
+  assert.match(html, /TokenomicsTimeline\.rangeDomain/);
+  assert.match(html, /timeZone: 'UTC'/);
   assert.match(html, /createCategoricalColorScale/);
   assert.match(html, /aggregateTimelineRows/);
   assert.match(html, /src="\/timeline\.js"/);
