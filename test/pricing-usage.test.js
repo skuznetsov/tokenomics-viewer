@@ -602,6 +602,96 @@ test("normalizes official nested Codex cache details and subtracts cumulative de
     output: 10_000,
   });
 });
+
+test("keeps cumulative deltas stable when Codex adds cache_write_input_tokens", () => {
+  const previous = usageFromCodexInfo({
+    total_token_usage: {
+      input_tokens: 523_649_941,
+      cached_input_tokens: 506_385_152,
+      output_tokens: 1_275_974,
+      total_tokens: 524_925_915,
+    },
+  });
+  const transitioned = usageFromCodexInfo({
+    total_token_usage: {
+      input_tokens: 523_844_053,
+      cached_input_tokens: 506_391_040,
+      cache_write_input_tokens: 0,
+      output_tokens: 1_277_045,
+      total_tokens: 525_121_098,
+    },
+    last_token_usage: {
+      input_tokens: 194_112,
+      cached_input_tokens: 5_888,
+      cache_write_input_tokens: 0,
+      output_tokens: 1_071,
+      total_tokens: 195_183,
+    },
+  }, previous.totalUsage);
+
+  assert.deepEqual({
+    input: transitioned.usage.input,
+    cacheRead: transitioned.usage.cacheRead,
+    cacheCreate30m: transitioned.usage.cacheCreate30m,
+    output: transitioned.usage.output,
+    sequenceReset: transitioned.usage.sequenceReset || false,
+  }, {
+    input: 188_224,
+    cacheRead: 5_888,
+    cacheCreate30m: 0,
+    output: 1_071,
+    sequenceReset: false,
+  });
+
+  const next = usageFromCodexInfo({
+    total_token_usage: {
+      input_tokens: 524_069_731,
+      cached_input_tokens: 506_604_800,
+      cache_write_input_tokens: 0,
+      output_tokens: 1_277_358,
+      total_tokens: 525_347_089,
+    },
+    last_token_usage: {
+      input_tokens: 225_678,
+      cached_input_tokens: 213_760,
+      cache_write_input_tokens: 0,
+      output_tokens: 313,
+      total_tokens: 225_991,
+    },
+  }, transitioned.totalUsage);
+
+  assert.deepEqual({
+    input: next.usage.input,
+    cacheRead: next.usage.cacheRead,
+    output: next.usage.output,
+  }, {
+    input: 11_918,
+    cacheRead: 213_760,
+    output: 313,
+  });
+});
+
+test("subtracts Codex cache write and read buckets when total_tokens includes them", () => {
+  const normalized = usage.usageFromCodexTokenUsage({
+    input_tokens: 200_000,
+    cached_input_tokens: 40_000,
+    cache_write_input_tokens: 10_000,
+    output_tokens: 5_000,
+    total_tokens: 205_000,
+  });
+
+  assert.deepEqual({
+    input: normalized.input,
+    cacheRead: normalized.cacheRead,
+    cacheCreate30m: normalized.cacheCreate30m,
+    output: normalized.output,
+  }, {
+    input: 150_000,
+    cacheRead: 40_000,
+    cacheCreate30m: 10_000,
+    output: 5_000,
+  });
+});
 test("aggregates Codex token_count by total deltas and skips duplicate snapshots", () => {
   const report = newReport();
   const processLine = createLineProcessor(report, defaultOptions(), "codex-delta-fixture");
