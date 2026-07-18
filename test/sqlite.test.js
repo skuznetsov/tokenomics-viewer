@@ -507,6 +507,8 @@ test("changed source replacement removes dependent SQLite rows", async () => {
     assert.equal(firstDb.prepare("SELECT count(*) AS count FROM usage_events").get().count, 1);
     assert.equal(firstDb.prepare("SELECT count(*) AS count FROM output_char_metrics").get().count, 1);
     assert.equal(firstDb.prepare("SELECT count(*) AS count FROM rate_limit_samples").get().count, 2);
+    assert.equal(firstDb.prepare("SELECT count(*) AS count FROM telemetry_events").get().count, 1);
+    assert.match(firstDb.prepare("SELECT raw_json FROM telemetry_events").get().raw_json, /token_count/);
   } finally {
     firstDb.close();
   }
@@ -518,6 +520,7 @@ test("changed source replacement removes dependent SQLite rows", async () => {
     assert.equal(secondDb.prepare("SELECT count(*) AS count FROM usage_events").get().count, 1);
     assert.equal(secondDb.prepare("SELECT count(*) AS count FROM output_char_metrics").get().count, 0);
     assert.equal(secondDb.prepare("SELECT count(*) AS count FROM rate_limit_samples").get().count, 0);
+    assert.equal(secondDb.prepare("SELECT count(*) AS count FROM telemetry_events").get().count, 1);
     assert.equal(secondDb.prepare("SELECT output FROM usage_events").get().output, 30);
   } finally {
     secondDb.close();

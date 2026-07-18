@@ -11,6 +11,8 @@ const { defaultOptions } = require("./support/fixtures");
 
 test("skips replayed parent transcript in forked Codex sessions", () => {
   const report = newReport();
+  const telemetry = [];
+  report._telemetryEventSink = (event) => telemetry.push(event);
   const parentSessionId = "019d39a3-df16-7c62-9614-4dcf15617287";
   const childSessionId = "019d4cf5-4803-7eb1-a490-19abc40e6a59";
   const parentTurnId = "019d39a7-67c2-7363-aa28-0b83b8639593";
@@ -118,6 +120,8 @@ test("skips replayed parent transcript in forked Codex sessions", () => {
   assert.equal(report.models["gpt-5-codex"].requests, 1);
   assert.equal(report.efforts.xhigh.requests, 1);
   assert.equal(Number(report.total.costUsd.toFixed(6)), 3.1375);
+  assert.equal(telemetry.length, 4);
+  assert.ok(telemetry.every((event) => event.eventKind === "usage_snapshot"));
 });
 
 test("normalizes uppercase fork parent IDs before parent trace lookup", () => {

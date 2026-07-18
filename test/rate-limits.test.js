@@ -225,6 +225,34 @@ test("rate-limit reset timestamps tolerate provider jitter", () => {
   assert.equal(stats.latestResetAt, 1_784_780_150);
 });
 
+test("rate-limit stats retain the latest reported plan type", () => {
+  const report = reportModel.newReport();
+  const add = (planType, timestamp) => rateLimits.addRateLimitSnapshot(report, {
+    limit_id: "plan-test",
+    plan_type: planType,
+    primary: { used_percent: 10, window_minutes: 10080, resets_at: 1_800_000_000 },
+  }, {
+    agent: "codex",
+    provider: "openai",
+    model: "gpt-5.6-luna",
+    timestamp: new Date(timestamp),
+    usage: simpleUsage(100, 1),
+    cost: { known: true, amount: 1, reasoningAmount: 0 },
+  });
+
+  add("prolite", "2026-07-09T12:00:00.000Z");
+  add("plus", "2026-07-09T13:00:00.000Z");
+  add("pro", "2026-07-18T12:00:00.000Z");
+  rateLimits.finalizeRateLimits(report);
+
+  assert.equal(report.rateLimits.windows["codex/plan-test:primary_10080m"].planType, "pro");
+  assert.deepEqual(report.rateLimits.planHistory.map((row) => [row.date, row.planType, row.samples]), [
+    ["2026-07-09", "plus", 1],
+    ["2026-07-09", "prolite", 1],
+    ["2026-07-18", "pro", 1],
+  ]);
+});
+
 test("rate-limit finalization is idempotent", () => {
   const report = reportModel.newReport();
   addRateLimitSample(report, 10, "2026-07-10T00:00:00.000Z");

@@ -78,18 +78,28 @@ test("subscription summary separates API equivalent from billed spend and expose
     limitId: "codex",
     kind: "primary",
     windowMinutes: 10080,
+    planType: "pro",
+    samples: 12,
     latestUsedPercent: 40,
     latestRemainingPercent: 60,
     latestAt: "2026-07-17T12:00:00.000Z",
     latestResetAt: Date.parse("2026-07-20T12:00:00.000Z") / 1000,
   };
+  report.rateLimits.planHistory = [
+    { date: "2026-07-17", agent: "codex", limitId: "codex", planType: "pro", samples: 12 },
+  ];
   report.quarterHourly["2026-07-13T12:00Z"] = statsFixture({ requests: 5, pricedRequests: 4, costUsd: 3 });
-  report.quarterHourly["2026-07-17T11:45Z"] = statsFixture({ requests: 5, pricedRequests: 4, costUsd: 5 });
+  report.quarterHourly["2026-07-17T11:45Z"] = statsFixture({ requests: 6, pricedRequests: 5, costUsd: 105 });
+  report.quarterHourly["2026-07-17T12:00Z"] = statsFixture({ requests: 1, pricedRequests: 1, costUsd: 999 });
   report.quarterHourlyProviderModels["2026-07-13T12:00Z"] = {
     openai: { "gpt-5.6-luna": statsFixture({ requests: 5, pricedRequests: 4, costUsd: 3 }) },
   };
   report.quarterHourlyProviderModels["2026-07-17T11:45Z"] = {
-    openai: { "gpt-5.6-sol": statsFixture({ requests: 5, pricedRequests: 4, costUsd: 5 }) },
+    openai: { "gpt-5.6-sol": statsFixture({ requests: 5, pricedRequests: 4, input: 100, cacheRead: 200, output: 10, costUsd: 5 }) },
+    anthropic: { "claude-opus-4-8": statsFixture({ requests: 1, pricedRequests: 1, input: 1_000, costUsd: 100 }) },
+  };
+  report.quarterHourlyProviderModels["2026-07-17T12:00Z"] = {
+    openai: { "gpt-5.6-future": statsFixture({ requests: 1, pricedRequests: 1, input: 999, costUsd: 999 }) },
   };
 
   const summary = webSummary(report, defaultOptions({ now: new Date("2026-07-17T12:00:00.000Z") }));
@@ -104,11 +114,26 @@ test("subscription summary separates API equivalent from billed spend and expose
   assert.equal(summary.subscriptionWindows[0].usedPercent, 40);
   assert.equal(summary.subscriptionWindows[0].apiEquivalentCostUsd, 8);
   assert.equal(summary.subscriptionWindows[0].pricingCoverage, 0.8);
+  assert.equal(summary.subscriptionWindows[0].provider, "openai");
+  assert.deepEqual(summary.subscriptionWindows[0].localTokens, {
+    input: 100,
+    cacheCreate: 0,
+    cacheRead: 200,
+    output: 10,
+    total: 310,
+  });
   assert.deepEqual(summary.subscriptionWindows[0].models.map((row) => [row.name, row.costUsd]), [
     ["openai/gpt-5.6-sol", 5],
     ["openai/gpt-5.6-luna", 3],
   ]);
   assert.equal(summary.subscriptionWindows.some((window) => window.windowMinutes === 300), false);
+  const openaiPlan = summary.subscriptionPlans.find((row) => row.provider === "openai");
+  assert.equal(openaiPlan.currentPlanId, "chatgpt-pro-200");
+  assert.equal(openaiPlan.currentPlanLabel, "ChatGPT Pro ($200)");
+  assert.equal(openaiPlan.source, "protocol");
+  assert.deepEqual(openaiPlan.history.map((row) => row.date), ["2026-07-17"]);
+  const anthropicPlan = summary.subscriptionPlans.find((row) => row.provider === "anthropic");
+  assert.equal(anthropicPlan.source, "none");
 });
 
 test("dashboard serves compact 15-minute timelines separately from the summary", () => {
@@ -342,8 +367,11 @@ test("dashboard exposes typed API and subscription usage profile controls", () =
   assert.match(html, /id="setting-usage-profile-mode"/);
   assert.match(html, /id="setting-usage-profile-name"/);
   assert.match(html, /id="subscription-limits"/);
+  assert.match(html, /id="subscription-plan-grid"/);
   assert.match(html, /summary\.costSemantics === 'api-equivalent'/);
   assert.match(html, /renderSubscriptionWindows\(summary\)/);
+  assert.match(html, /renderSubscriptionPlans\(summary\)/);
+  assert.doesNotMatch(html, /\bformatUsd\(/);
   assert.match(html, /await loadSummary\(\)/);
 });
 

@@ -43,8 +43,16 @@
     .value { font-size:22px; font-weight:700; margin-top:3px; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
     .card-meta { color:var(--muted); font-size:12px; margin-top:2px; font-variant-numeric:tabular-nums; }
     .token-card .value { font-size:16px; white-space:nowrap; }
-    .quota-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; }
-    .quota-item { min-width:0; border:1px solid var(--line); border-radius:6px; padding:12px; }
+    .plan-grid, .quota-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; }
+    .plan-grid { margin-bottom:12px; }
+    .plan-item, .quota-item { min-width:0; border:1px solid var(--line); border-radius:6px; padding:12px; }
+    .plan-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .plan-name { margin-top:5px; font-size:16px; font-weight:700; }
+    .plan-badge { border:1px solid var(--line); border-radius:999px; padding:2px 7px; color:var(--muted); font-size:11px; white-space:nowrap; }
+    .plan-evidence { margin-top:5px; color:var(--muted); font-size:12px; }
+    .plan-history { margin-top:9px; border-top:1px solid var(--line); }
+    .plan-history-row { display:grid; grid-template-columns:74px minmax(0, 1fr); gap:8px; padding-top:7px; color:var(--muted); font-size:11px; }
+    .plan-history-row strong { color:var(--ink); font-weight:600; }
     .quota-head, .quota-metric, .quota-model-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
     .quota-head strong, .quota-metric strong { font-variant-numeric:tabular-nums; }
     .quota-track { height:8px; margin:9px 0; background:var(--soft); overflow:hidden; }
@@ -178,6 +186,7 @@
     <section class="kpi-band" id="overview-section"><div class="cards" id="cards"></div></section>
     <section class="is-hidden" id="subscription-limits">
       <div class="panel-head"><div class="panel-title-stack"><h2>Subscription Limits</h2><div class="muted" id="subscription-limits-summary"></div></div></div>
+      <div class="plan-grid" id="subscription-plan-grid"></div>
       <div class="quota-grid" id="subscription-limits-grid"></div>
     </section>
     <section id="recommendations-section">
@@ -377,12 +386,71 @@
       return minutes + '-minute window';
     }
 
+    function renderSubscriptionPlans(summary) {
+      const grid = document.getElementById('subscription-plan-grid');
+      const plans = summary.subscriptionPlans || [];
+      grid.innerHTML = plans.map(plan => {
+        const badge = plan.source === 'protocol' ? (plan.stale ? 'Last observed' : 'Observed')
+          : plan.source === 'inference' ? (plan.likelyPlanLabel ? 'Likely' : 'Historical')
+          : plan.source === 'conflict' ? 'Conflict'
+          : plan.source === 'unsupported' ? 'Unsupported'
+          : 'Not detected';
+        const inferred = plan.inference || null;
+        const effective = plan.currentPlanLabel || (plan.lastObservedPlanLabel && plan.stale
+          ? 'Current unknown · last observed ' + plan.lastObservedPlanLabel
+          : plan.likelyPlanLabel
+          ? 'Likely ' + plan.likelyPlanLabel
+          : inferred?.lastInferredPlanLabel
+          ? 'Current unknown · last inferred ' + inferred.lastInferredPlanLabel
+          : 'Plan not observable');
+        const capacity = Number.isFinite(plan.capacityMultiple) ? plan.capacityMultiple + 'x baseline' : null;
+        const observed = plan.observedPlanType
+          ? 'plan_type=' + plan.observedPlanType + (plan.observedAt ? ' · ' + new Date(plan.observedAt).toLocaleDateString() : '')
+          : plan.conflict && plan.observedPlanTypes?.length
+          ? 'conflicting plan_type=' + plan.observedPlanTypes.join(' / ')
+          : null;
+        const inferredEvidence = inferred
+          ? 'limit-hit clusters ' + formatUsdCompact(inferred.lowMedianCostUsd) + ' / ' + formatUsdCompact(inferred.highMedianCostUsd) +
+            ' · ' + inferred.capacityRatio.toFixed(1) + 'x' +
+            (inferred.alternativePlanPair ? ' · alternate tier pair possible' : '') +
+            (inferred.downgradeEligibleAt ? ' · downgrade possible after ' + inferred.downgradeEligibleAt.slice(0, 10) : '') +
+            (inferred.evidenceExpiresAt ? ' · evidence fresh through ' + inferred.evidenceExpiresAt.slice(0, 10) : '')
+          : null;
+        const evidence = [capacity, observed, inferredEvidence, plan.stale ? 'Stale evidence' : null].filter(Boolean).join(' · ');
+        const directHistory = (plan.history || []).slice(0, 8).map(day => {
+          const signals = day.signals.map(signal => {
+            const share = Number.isFinite(signal.share) ? ' ' + formatPct(signal.share) : '';
+            return (signal.planLabel || signal.planType) + share;
+          }).join(' · ');
+          return '<div class="plan-history-row"><strong>' + esc(day.date.slice(5)) + '</strong><span>' + esc(signals) + '</span></div>';
+        }).join('');
+        const inferredHistory = (inferred?.segments || []).slice(-8).reverse().map(segment => {
+          const range = segment.from.slice(5, 10) + (segment.through.slice(0, 10) === segment.from.slice(0, 10) ? '' : '–' + segment.through.slice(5, 10));
+          const evidenceParts = [];
+          if (segment.anchors) evidenceParts.push(segment.anchors + ' limit anchor' + (segment.anchors === 1 ? '' : 's'));
+          if (segment.weeklyPeaks) evidenceParts.push(segment.weeklyPeaks + ' weekly lower bound' + (segment.weeklyPeaks === 1 ? '' : 's'));
+          return '<div class="plan-history-row"><strong>' + esc(range) + '</strong><span>' + esc(segment.planLabel + ' · ' + evidenceParts.join(' · ')) + '</span></div>';
+        }).join('');
+        const peakHistory = (inferred?.weeklyPeaks || []).slice(-4).reverse().map(peak =>
+          '<div class="plan-history-row"><strong>' + esc(peak.week.replace(/^\d{4}-/, '')) + '</strong><span>' +
+          esc('max 5h ' + formatUsdCompact(peak.costUsd) + ' · heuristic floor ' + peak.minimumPlanLabel) + '</span></div>'
+        ).join('');
+        const history = directHistory || (inferredHistory + peakHistory);
+        return '<div class="plan-item" title="' + esc(plan.caveat || '') + '">' +
+          '<div class="plan-head"><strong>' + esc(plan.providerLabel) + '</strong><span class="plan-badge">' + esc(badge) + '</span></div>' +
+          '<div class="plan-name">' + esc(effective) + '</div>' +
+          '<div class="plan-evidence">' + esc(evidence || plan.caveat || '') + '</div>' +
+          (history ? '<div class="plan-history">' + history + '</div>' : '') + '</div>';
+      }).join('');
+    }
+
     function renderSubscriptionWindows(summary) {
       const section = document.getElementById('subscription-limits');
       const windows = summary.subscriptionWindows || [];
       const subscription = summary.costSemantics === 'api-equivalent';
       section.classList.toggle('is-hidden', !subscription);
       if (!subscription) return;
+      renderSubscriptionPlans(summary);
       document.getElementById('subscription-limits-summary').textContent =
         (summary.usageProfile?.name || 'Subscription') + ' · API list-price equivalent, not billed spend';
       const grid = document.getElementById('subscription-limits-grid');

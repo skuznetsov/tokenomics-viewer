@@ -414,6 +414,7 @@ test("ClickHouse sync streams usage rows in bounded insert chunks", async () => 
     assert.equal(report.total.requests, rows);
     const queries = mock.requests.map((request) => request.query);
     assert.ok(queries.some((query) => query === "DROP TABLE IF EXISTS rate_limit_samples"));
+    assert.ok(queries.some((query) => query === "DROP TABLE IF EXISTS telemetry_events"));
     assert.ok(queries.some((query) => query === "DROP TABLE IF EXISTS usage_events"));
     assert.ok(queries.some((query) => query === "DROP TABLE IF EXISTS sessions"));
     assert.ok(queries.some((query) => query === "DROP TABLE IF EXISTS codex_sessions"));
@@ -430,6 +431,10 @@ test("ClickHouse sync streams usage rows in bounded insert chunks", async () => 
       && query.includes("CODEC(Delta, ZSTD(1))")
       && query.includes("CODEC(Gorilla, ZSTD(1))")
     )));
+    assert.ok(queries.some((query) => (
+      query.includes("CREATE TABLE IF NOT EXISTS telemetry_events")
+      && query.includes("raw_json String CODEC(ZSTD(6))")
+    )));
     const alter = queries.find((query) => query.trim().startsWith("ALTER TABLE usage_events"));
     assert.ok(alter, "long ALTER TABLE SQL should be observed from the request body");
     assert.match(alter, /ADD COLUMN IF NOT EXISTS visible_chars_per_token/);
@@ -437,6 +442,8 @@ test("ClickHouse sync streams usage rows in bounded insert chunks", async () => 
     assert.match(usageStatsQuery, /'providerModelEffortDaily' AS bucket/);
     assert.match(usageStatsQuery, /GROUP BY provider, model, effort, date_key/);
     assert.equal(mock.inserts.usage_events.reduce((sum, insert) => sum + insert.rows, 0), rows);
+    assert.equal(mock.inserts.telemetry_events.reduce((sum, insert) => sum + insert.rows, 0), rows);
+    assert.match(mock.inserts.telemetry_events[0].body, /token_count/);
     assert.ok(mock.inserts.usage_events.length > 1);
     assert.ok(mock.inserts.usage_events.every((insert) => insert.rows <= 100_000));
     assert.ok(mock.inserts.usage_events.every((insert) => insert.bytes <= 70 * 1024));
@@ -562,7 +569,7 @@ test("ClickHouse keeps the whole committed generation visible when a later sourc
       request.query.trim() === "INSERT INTO import_generations FORMAT JSONEachRow"
     ));
     const lastDataInsert = mock.requests.findLastIndex((request) => (
-      /^INSERT INTO (usage_events|output_char_metrics|rate_limit_samples|sessions|sources|codex_session_versions|import_generation_sources) FORMAT JSONEachRow$/.test(request.query.trim())
+      /^INSERT INTO (usage_events|output_char_metrics|rate_limit_samples|telemetry_events|sessions|sources|codex_session_versions|import_generation_sources) FORMAT JSONEachRow$/.test(request.query.trim())
     ));
     assert.ok(markerInsert > lastDataInsert, "the global generation marker must be published last");
 
@@ -636,8 +643,12 @@ test("ClickHouse report pins one committed generation across every query", async
   const rateLimitQuery = mock.requests.find((request) => request.query.includes("ignoredNonMonotonic"))?.query;
   assert.ok(rateLimitQuery);
   assert.match(rateLimitQuery, /AND same_window/);
+  assert.match(rateLimitQuery, /argMaxIf\(plan_type[^\n]+isNotNull\(plan_type\)/);
   assert.match(rateLimitQuery, /argMaxIf\(used_percent[^\n]+ignored_non_monotonic = 0\)/);
   assert.match(rateLimitQuery, /maxIf\(timestamp_ms, ignored_non_monotonic = 0\)/);
+  const planHistoryQuery = mock.requests.find((request) => request.query.includes("GROUP BY date_key, agent, limit_id, plan_type"))?.query;
+  assert.ok(planHistoryQuery);
+  assert.doesNotMatch(planHistoryQuery, /any\((agent|limit_id)\)/);
   assert.match(usageStatsQuery, /toStartOfInterval\(parseDateTimeBestEffortOrNull\(timestamp\), INTERVAL 15 MINUTE\)/);
   assert.match(usageStatsQuery, /projectQuarterHourlyProviderModels/);
 });

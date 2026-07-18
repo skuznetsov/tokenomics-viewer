@@ -62,6 +62,68 @@ test("aggregates Claude by model, deduplicates requestId, and prices cache bucke
   });
 });
 
+test("captures provider telemetry without retaining conversation content", () => {
+  const report = newReport();
+  const telemetry = [];
+  report._telemetryEventSink = (event) => telemetry.push(event);
+  const processLine = createLineProcessor(report, defaultOptions(), "claude-telemetry-fixture");
+  const usageLine = JSON.stringify({
+    type: "assistant",
+    timestamp: "2026-06-29T11:30:55.738Z",
+    requestId: "req_telemetry",
+    cwd: "/tmp/telemetry",
+    message: {
+      model: "claude-opus-4-8",
+      content: [{ type: "text", text: "private conversation text" }],
+      usage: { input_tokens: 2, cache_read_input_tokens: 100, output_tokens: 5, service_tier: "standard" },
+    },
+  });
+  processLine(usageLine, 1);
+  processLine(usageLine, 2);
+  processLine(JSON.stringify({
+    type: "assistant",
+    timestamp: "2026-07-06T21:14:14.540Z",
+    error: "rate_limit",
+    apiErrorStatus: 429,
+    version: "2.1.201",
+    cwd: "/tmp/telemetry",
+    message: {
+      model: "<synthetic>",
+      content: [{ type: "text", text: "You've hit your session limit · resets 5:40pm" }],
+      usage: { input_tokens: 0, output_tokens: 0 },
+    },
+  }), 3);
+
+  assert.equal(telemetry.length, 3);
+  assert.equal(telemetry[0].eventKind, "usage_snapshot");
+  assert.equal(JSON.parse(telemetry[0].rawJson).service_tier, "standard");
+  assert.doesNotMatch(telemetry[0].rawJson, /private conversation text/);
+  assert.equal(telemetry[1].eventKind, "usage_snapshot");
+  assert.equal(telemetry[2].eventKind, "rate_limit_error");
+  assert.equal(report.total.requests, 1, "raw duplicates must not change usage projections");
+  assert.equal(report.providerLimitEvents.length, 1);
+  assert.match(report.providerLimitEvents[0].message, /session limit/);
+});
+
+test("does not misclassify a Codex rate-limit error as an Anthropic limit anchor", () => {
+  const report = newReport();
+  const processLine = createLineProcessor(report, defaultOptions(), "codex-error-fixture");
+
+  processLine(JSON.stringify({
+    type: "session_meta",
+    timestamp: "2026-07-18T10:00:00.000Z",
+    payload: { cwd: "/tmp/codex", model_provider: "openai", model: "gpt-5.6-sol" },
+  }), 1);
+  processLine(JSON.stringify({
+    type: "assistant",
+    timestamp: "2026-07-18T10:00:01.000Z",
+    error: "rate_limit",
+    message: { model: "gpt-5.6-sol", usage: { input_tokens: 0, output_tokens: 0 }, content: [] },
+  }), 2);
+
+  assert.deepEqual(report.providerLimitEvents, []);
+});
+
 test("aggregates Codex token_count by turn_context model and OpenAI cached input pricing", () => {
   const report = newReport();
   const processLine = createLineProcessor(report, defaultOptions(), "codex-fixture");
