@@ -62,6 +62,68 @@ test("aggregates Claude by model, deduplicates requestId, and prices cache bucke
   });
 });
 
+test("captures provider telemetry without retaining conversation content", () => {
+  const report = newReport();
+  const telemetry = [];
+  report._telemetryEventSink = (event) => telemetry.push(event);
+  const processLine = createLineProcessor(report, defaultOptions(), "claude-telemetry-fixture");
+  const usageLine = JSON.stringify({
+    type: "assistant",
+    timestamp: "2026-06-29T11:30:55.738Z",
+    requestId: "req_telemetry",
+    cwd: "/tmp/telemetry",
+    message: {
+      model: "claude-opus-4-8",
+      content: [{ type: "text", text: "private conversation text" }],
+      usage: { input_tokens: 2, cache_read_input_tokens: 100, output_tokens: 5, service_tier: "standard" },
+    },
+  });
+  processLine(usageLine, 1);
+  processLine(usageLine, 2);
+  processLine(JSON.stringify({
+    type: "assistant",
+    timestamp: "2026-07-06T21:14:14.540Z",
+    error: "rate_limit",
+    apiErrorStatus: 429,
+    version: "2.1.201",
+    cwd: "/tmp/telemetry",
+    message: {
+      model: "<synthetic>",
+      content: [{ type: "text", text: "You've hit your session limit · resets 5:40pm" }],
+      usage: { input_tokens: 0, output_tokens: 0 },
+    },
+  }), 3);
+
+  assert.equal(telemetry.length, 3);
+  assert.equal(telemetry[0].eventKind, "usage_snapshot");
+  assert.equal(JSON.parse(telemetry[0].rawJson).service_tier, "standard");
+  assert.doesNotMatch(telemetry[0].rawJson, /private conversation text/);
+  assert.equal(telemetry[1].eventKind, "usage_snapshot");
+  assert.equal(telemetry[2].eventKind, "rate_limit_error");
+  assert.equal(report.total.requests, 1, "raw duplicates must not change usage projections");
+  assert.equal(report.providerLimitEvents.length, 1);
+  assert.match(report.providerLimitEvents[0].message, /session limit/);
+});
+
+test("does not misclassify a Codex rate-limit error as an Anthropic limit anchor", () => {
+  const report = newReport();
+  const processLine = createLineProcessor(report, defaultOptions(), "codex-error-fixture");
+
+  processLine(JSON.stringify({
+    type: "session_meta",
+    timestamp: "2026-07-18T10:00:00.000Z",
+    payload: { cwd: "/tmp/codex", model_provider: "openai", model: "gpt-5.6-sol" },
+  }), 1);
+  processLine(JSON.stringify({
+    type: "assistant",
+    timestamp: "2026-07-18T10:00:01.000Z",
+    error: "rate_limit",
+    message: { model: "gpt-5.6-sol", usage: { input_tokens: 0, output_tokens: 0 }, content: [] },
+  }), 2);
+
+  assert.deepEqual(report.providerLimitEvents, []);
+});
+
 test("aggregates Codex token_count by turn_context model and OpenAI cached input pricing", () => {
   const report = newReport();
   const processLine = createLineProcessor(report, defaultOptions(), "codex-fixture");
@@ -600,6 +662,96 @@ test("normalizes official nested Codex cache details and subtracts cumulative de
     cacheRead: 50_000,
     cacheCreate30m: 50_000,
     output: 10_000,
+  });
+});
+
+test("keeps cumulative deltas stable when Codex adds cache_write_input_tokens", () => {
+  const previous = usageFromCodexInfo({
+    total_token_usage: {
+      input_tokens: 523_649_941,
+      cached_input_tokens: 506_385_152,
+      output_tokens: 1_275_974,
+      total_tokens: 524_925_915,
+    },
+  });
+  const transitioned = usageFromCodexInfo({
+    total_token_usage: {
+      input_tokens: 523_844_053,
+      cached_input_tokens: 506_391_040,
+      cache_write_input_tokens: 0,
+      output_tokens: 1_277_045,
+      total_tokens: 525_121_098,
+    },
+    last_token_usage: {
+      input_tokens: 194_112,
+      cached_input_tokens: 5_888,
+      cache_write_input_tokens: 0,
+      output_tokens: 1_071,
+      total_tokens: 195_183,
+    },
+  }, previous.totalUsage);
+
+  assert.deepEqual({
+    input: transitioned.usage.input,
+    cacheRead: transitioned.usage.cacheRead,
+    cacheCreate30m: transitioned.usage.cacheCreate30m,
+    output: transitioned.usage.output,
+    sequenceReset: transitioned.usage.sequenceReset || false,
+  }, {
+    input: 188_224,
+    cacheRead: 5_888,
+    cacheCreate30m: 0,
+    output: 1_071,
+    sequenceReset: false,
+  });
+
+  const next = usageFromCodexInfo({
+    total_token_usage: {
+      input_tokens: 524_069_731,
+      cached_input_tokens: 506_604_800,
+      cache_write_input_tokens: 0,
+      output_tokens: 1_277_358,
+      total_tokens: 525_347_089,
+    },
+    last_token_usage: {
+      input_tokens: 225_678,
+      cached_input_tokens: 213_760,
+      cache_write_input_tokens: 0,
+      output_tokens: 313,
+      total_tokens: 225_991,
+    },
+  }, transitioned.totalUsage);
+
+  assert.deepEqual({
+    input: next.usage.input,
+    cacheRead: next.usage.cacheRead,
+    output: next.usage.output,
+  }, {
+    input: 11_918,
+    cacheRead: 213_760,
+    output: 313,
+  });
+});
+
+test("subtracts Codex cache write and read buckets when total_tokens includes them", () => {
+  const normalized = usage.usageFromCodexTokenUsage({
+    input_tokens: 200_000,
+    cached_input_tokens: 40_000,
+    cache_write_input_tokens: 10_000,
+    output_tokens: 5_000,
+    total_tokens: 205_000,
+  });
+
+  assert.deepEqual({
+    input: normalized.input,
+    cacheRead: normalized.cacheRead,
+    cacheCreate30m: normalized.cacheCreate30m,
+    output: normalized.output,
+  }, {
+    input: 150_000,
+    cacheRead: 40_000,
+    cacheCreate30m: 10_000,
+    output: 5_000,
   });
 });
 test("aggregates Codex token_count by total deltas and skips duplicate snapshots", () => {

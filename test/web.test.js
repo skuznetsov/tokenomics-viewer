@@ -68,6 +68,8 @@ test("web server serves stored SQLite summary and sessions", async () => {
 
     const absoluteTimeline = await fetch(`${base}/api/timeline?from=2026-07-05&to=2026-07-05`).then((response) => response.json());
     assert.equal(absoluteTimeline.length, 1);
+    const timestampTimeline = await fetch(`${base}/api/timeline?fromAt=2026-07-05T00%3A00%3A00.000Z&toAt=2026-07-06T00%3A00%3A00.000Z`).then((response) => response.json());
+    assert.equal(timestampTimeline.length, 1);
     const reversedRange = await fetch(`${base}/api/timeline?from=2026-07-06&to=2026-07-05`);
     assert.equal(reversedRange.status, 400);
     const mixedRange = await fetch(`${base}/api/timeline?days=1&from=2026-07-05`);
@@ -76,6 +78,8 @@ test("web server serves stored SQLite summary and sessions", async () => {
     assert.equal(invalidRange.status, 400);
     const malformedCalendarRange = await fetch(`${base}/api/timeline?from=2026-99-99`);
     assert.equal(malformedCalendarRange.status, 400);
+    const incompleteTimestampRange = await fetch(`${base}/api/timeline?fromAt=2026-07-05T00%3A00%3A00.000Z`);
+    assert.equal(incompleteTimestampRange.status, 400);
 
     const sessions = await fetch(`${base}/api/sessions`).then((response) => response.json());
     assert.equal(sessions.length, 1);
@@ -236,6 +240,63 @@ test("configuration API is readable but loopback and action-header protected for
     const summary = await fetch(`${base}/api/summary`);
     assert.equal((await summary.json()).configurationRevision, "catalog-b");
     assert.equal(reportBuilds, 1);
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("profile-only configuration writes patch the report cache without rebuilding analytics", async () => {
+  const configuration = {
+    revision: "profile-a",
+    settings: {
+      openaiContext: "auto",
+      pricingBasis: "standard",
+      pricingRevision: "prices-a",
+      regionalMultiplier: 1,
+      monthlyCostLimitUsd: null,
+      usageProfile: { id: "default", name: "Work API", mode: "api" },
+    },
+    prices: [],
+  };
+  let reportBuilds = 0;
+  const web = createWebServer({
+    buildReportFromSelectedDatabase: async () => {
+      reportBuilds += 1;
+      return newReport();
+    },
+    resolveDbPath: () => Path.join(os.tmpdir(), "tokenomics-profile-fast-path.sqlite"),
+    loadConfiguration: async () => configuration,
+    saveConfiguration: async (_options, next) => ({
+      ...next,
+      revision: "profile-b",
+      settings: { ...next.settings, pricingRevision: "prices-a" },
+    }),
+  });
+  const initialReport = {
+    ...newReport(),
+    configurationRevision: "profile-a",
+    pricingRevision: "prices-a",
+  };
+  const server = await web.startWebServer(defaultOptions({
+    preloadedReport: initialReport,
+    host: "127.0.0.1",
+    port: 0,
+  }));
+  try {
+    const updated = structuredClone(configuration);
+    updated.settings.usageProfile = { id: "home", name: "Home Subscription", mode: "subscription" };
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const response = await fetch(`${base}/api/configuration`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", "x-tokenomics-action": "configuration" },
+      body: JSON.stringify(updated),
+    });
+
+    assert.equal(response.status, 200);
+    const summary = await fetch(`${base}/api/summary`).then((result) => result.json());
+    assert.equal(reportBuilds, 0);
+    assert.equal(summary.configurationRevision, "profile-b");
+    assert.equal(summary.usageProfile.mode, "subscription");
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

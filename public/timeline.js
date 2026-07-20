@@ -8,7 +8,9 @@
   const QUARTER_HOUR_MS = 15 * 60 * 1000;
   const HOUR_MS = 60 * 60 * 1000;
   const DAY_MS = 24 * HOUR_MS;
+  const WEEK_MS = 7 * DAY_MS;
   const MONTH_ESTIMATE_MS = 30 * DAY_MS;
+  const YEAR_ESTIMATE_MS = 365 * DAY_MS;
   const WHEEL_ZOOM_FACTOR = 1.16;
 
   function clamp(value, min, max) {
@@ -75,6 +77,7 @@
 
   function periodStart(name) {
     if (typeof name !== "string") return NaN;
+    if (/^\d{4}$/.test(name)) return Date.parse(`${name}-01-01T00:00:00Z`);
     if (/^\d{4}-\d{2}$/.test(name)) return Date.parse(`${name}-01T00:00:00Z`);
     if (/^\d{4}-\d{2}-\d{2}$/.test(name)) return Date.parse(`${name}T00:00:00Z`);
     return Date.parse(name);
@@ -86,6 +89,9 @@
     if (range.mode === "absolute") {
       start = periodStart(range.from);
       end = periodStart(range.to) + DAY_MS;
+    } else if (range.calendarMonth) {
+      start = Date.parse(range.monthStartAt);
+      end = Date.parse(range.monthEndAt);
     } else {
       const availableStart = periodStart(range.availableFrom);
       const availableEnd = periodStart(range.availableTo);
@@ -104,7 +110,16 @@
     if (resolution === "15m") return name;
     if (resolution === "hourly") return `${name.slice(0, 13)}:00Z`;
     if (resolution === "daily") return name.slice(0, 10);
+    if (resolution === "weekly") {
+      const date = new Date(periodStart(name));
+      if (Number.isNaN(date.getTime())) throw new RangeError(`invalid timeline period: ${name}`);
+      const daysSinceMonday = (date.getUTCDay() + 6) % 7;
+      date.setUTCHours(0, 0, 0, 0);
+      date.setUTCDate(date.getUTCDate() - daysSinceMonday);
+      return date.toISOString().slice(0, 10);
+    }
     if (resolution === "monthly") return name.slice(0, 7);
+    if (resolution === "yearly") return name.slice(0, 4);
     throw new RangeError(`unsupported timeline resolution: ${resolution}`);
   }
 
@@ -112,8 +127,27 @@
     if (resolution === "15m") return QUARTER_HOUR_MS;
     if (resolution === "hourly") return HOUR_MS;
     if (resolution === "daily") return DAY_MS;
+    if (resolution === "weekly") return WEEK_MS;
     if (resolution === "monthly") return MONTH_ESTIMATE_MS;
+    if (resolution === "yearly") return YEAR_ESTIMATE_MS;
     return null;
+  }
+
+  function bucketCenter(name, resolution) {
+    const start = periodStart(name);
+    if (!Number.isFinite(start)) return NaN;
+    if (resolution === "monthly") {
+      const end = new Date(start);
+      end.setUTCMonth(end.getUTCMonth() + 1);
+      return start + (end.getTime() - start) / 2;
+    }
+    if (resolution === "yearly") {
+      const end = new Date(start);
+      end.setUTCFullYear(end.getUTCFullYear() + 1);
+      return start + (end.getTime() - start) / 2;
+    }
+    const interval = resolutionIntervalMs(resolution);
+    return Number.isFinite(interval) ? start + interval / 2 : NaN;
   }
 
   function chooseAdaptiveResolution(start, end, pointBudget = 160) {
@@ -121,8 +155,10 @@
     const budget = Math.max(1, Math.floor(pointBudget));
     if (span / QUARTER_HOUR_MS <= budget) return "15m";
     if (span / HOUR_MS <= budget) return "hourly";
-    if (span / DAY_MS <= budget) return "daily";
-    return "monthly";
+    if (span / DAY_MS <= Math.min(budget, 90)) return "daily";
+    if (span / WEEK_MS <= Math.min(budget, 26)) return "weekly";
+    if (span / MONTH_ESTIMATE_MS <= Math.min(budget, 24)) return "monthly";
+    return "yearly";
   }
 
   function domainForRows(rows) {
@@ -132,6 +168,17 @@
       start: Math.min(...times),
       end: Math.max(...times) + QUARTER_HOUR_MS,
     };
+  }
+
+  function tickIndexes(count, target) {
+    if (count <= 0 || target <= 0) return [];
+    if (count === 1) return [0];
+    const steps = Math.min(target, count - 1);
+    const seen = new Set();
+    for (let index = 0; index <= steps; index += 1) {
+      seen.add(Math.round((index * (count - 1)) / steps));
+    }
+    return [...seen].sort((left, right) => left - right);
   }
 
   function fitDomain(start, end, full, minSpan = QUARTER_HOUR_MS) {
@@ -180,6 +227,7 @@
     QUARTER_HOUR_MS,
     HOUR_MS,
     DAY_MS,
+    bucketCenter,
     bucketName,
     chooseAdaptiveResolution,
     createCategoricalColorScale,
@@ -191,6 +239,7 @@
     rememberBounded,
     resolutionIntervalMs,
     selectDomain,
+    tickIndexes,
     zoomDomain,
   };
 }));

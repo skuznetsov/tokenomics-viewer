@@ -193,6 +193,64 @@ test("rate-limit finalization ignores same-window non-monotonic samples", () => 
   assert.equal(stats.increases, 1);
   assert.equal(stats.percentUsedDelta, 10);
   assert.equal(stats.ignoredNonMonotonic, 1);
+  assert.equal(stats.latestUsedPercent, 20);
+  assert.equal(stats.latestAt, "2026-07-10T01:00:00.000Z");
+});
+
+test("rate-limit reset timestamps tolerate provider jitter", () => {
+  const report = reportModel.newReport();
+  const add = (usedPercent, timestamp, resetsAt) => {
+    rateLimits.addRateLimitSnapshot(report, {
+      limit_id: "jitter-test",
+      primary: { used_percent: usedPercent, window_minutes: 10080, resets_at: resetsAt },
+    }, {
+      agent: "codex",
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      effort: "high",
+      timestamp: new Date(timestamp),
+      usage: simpleUsage(100, 1),
+      cost: { known: true, amount: 1, reasoningAmount: 0 },
+    });
+  };
+
+  add(44, "2026-07-17T05:00:00.000Z", 1_784_780_146);
+  add(45, "2026-07-17T06:00:00.000Z", 1_784_780_149);
+  add(46, "2026-07-17T07:00:00.000Z", 1_784_780_150);
+  rateLimits.finalizeRateLimits(report);
+
+  const stats = report.rateLimits.windows["codex/jitter-test:primary_10080m"];
+  assert.equal(stats.resets, 0);
+  assert.equal(stats.percentUsedDelta, 2);
+  assert.equal(stats.latestResetAt, 1_784_780_150);
+});
+
+test("rate-limit stats retain the latest reported plan type", () => {
+  const report = reportModel.newReport();
+  const add = (planType, timestamp) => rateLimits.addRateLimitSnapshot(report, {
+    limit_id: "plan-test",
+    plan_type: planType,
+    primary: { used_percent: 10, window_minutes: 10080, resets_at: 1_800_000_000 },
+  }, {
+    agent: "codex",
+    provider: "openai",
+    model: "gpt-5.6-luna",
+    timestamp: new Date(timestamp),
+    usage: simpleUsage(100, 1),
+    cost: { known: true, amount: 1, reasoningAmount: 0 },
+  });
+
+  add("prolite", "2026-07-09T12:00:00.000Z");
+  add("plus", "2026-07-09T13:00:00.000Z");
+  add("pro", "2026-07-18T12:00:00.000Z");
+  rateLimits.finalizeRateLimits(report);
+
+  assert.equal(report.rateLimits.windows["codex/plan-test:primary_10080m"].planType, "pro");
+  assert.deepEqual(report.rateLimits.planHistory.map((row) => [row.date, row.planType, row.samples]), [
+    ["2026-07-09", "plus", 1],
+    ["2026-07-09", "prolite", 1],
+    ["2026-07-18", "pro", 1],
+  ]);
 });
 
 test("rate-limit finalization is idempotent", () => {
@@ -205,4 +263,3 @@ test("rate-limit finalization is idempotent", () => {
   rateLimits.finalizeRateLimits(report);
   assert.deepEqual(report.rateLimits, first);
 });
-

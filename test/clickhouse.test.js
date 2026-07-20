@@ -225,7 +225,7 @@ function createClickHouseServer({ failureStatus = null, failureBody = "", failur
       }
 
       response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-      if (query.includes("FROM usage_events") && query.includes("UNION ALL")) {
+      if (query.includes("FROM usage_events") && query.includes("GROUP BY GROUPING SETS")) {
         const generationId = url.searchParams.get("param_generation");
         const usageRows = visibleRows("usage_events", generationId).length;
         response.end(`${JSON.stringify({
@@ -292,10 +292,13 @@ test("ClickHouse configuration revisions publish marker-last and reject stale wr
     const initial = await loadConfiguration(options);
     const edited = structuredClone(initial);
     edited.settings.regionalMultiplier = 1.1;
+    edited.settings.monthlyCostLimitUsd = 10_000;
     const saved = await saveConfiguration(options, edited);
 
     assert.notEqual(saved.revision, initial.revision);
-    assert.equal((await loadConfiguration(options)).settings.regionalMultiplier, 1.1);
+    const reloaded = await loadConfiguration(options);
+    assert.equal(reloaded.settings.regionalMultiplier, 1.1);
+    assert.equal(reloaded.settings.monthlyCostLimitUsd, 10_000);
     await assert.rejects(saveConfiguration(options, edited), /configuration revision conflict/);
     const settingsInsert = mock.requests.findIndex((request) => request.query.startsWith("INSERT INTO analytics_settings"));
     const pricingInsert = mock.requests.findIndex((request) => request.query.startsWith("INSERT INTO pricing_catalog"));
@@ -320,6 +323,24 @@ test("ClickHouse pricing overlay failure leaves the previous configuration visib
     await assert.rejects(saveConfiguration(options, edited), /injected query failure/);
     assert.equal((await loadConfiguration(options)).revision, initial.revision);
     assert.equal(mock.activeRows.configuration_revisions.length, 1);
+  });
+});
+
+test("ClickHouse profile-only configuration changes reuse pricing overlays", async () => {
+  const mock = createClickHouseServer();
+  await withServer(mock, async (clickhouseUrl) => {
+    const options = defaultOptions({ dbEngine: "clickhouse", clickhouseUrl, clickhouseDatabase: "tokenomics_profile_test" });
+    const initial = await loadConfiguration(options);
+    const edited = structuredClone(initial);
+    edited.settings.usageProfile = { id: "home", name: "Home Subscription", mode: "subscription" };
+    const before = mock.requests.length;
+    const saved = await saveConfiguration(options, edited);
+    const requests = mock.requests.slice(before);
+
+    assert.notEqual(saved.revision, initial.revision);
+    assert.equal(saved.settings.pricingRevision, initial.settings.pricingRevision);
+    assert.equal(requests.some((request) => request.query.trimStart().startsWith("INSERT INTO usage_event_costs")), false);
+    assert.equal(requests.some((request) => request.query.trimStart().startsWith("INSERT INTO rate_limit_sample_costs")), false);
   });
 });
 
@@ -393,6 +414,7 @@ test("ClickHouse sync streams usage rows in bounded insert chunks", async () => 
     assert.equal(report.total.requests, rows);
     const queries = mock.requests.map((request) => request.query);
     assert.ok(queries.some((query) => query === "DROP TABLE IF EXISTS rate_limit_samples"));
+    assert.ok(queries.some((query) => query === "DROP TABLE IF EXISTS telemetry_events"));
     assert.ok(queries.some((query) => query === "DROP TABLE IF EXISTS usage_events"));
     assert.ok(queries.some((query) => query === "DROP TABLE IF EXISTS sessions"));
     assert.ok(queries.some((query) => query === "DROP TABLE IF EXISTS codex_sessions"));
@@ -409,13 +431,22 @@ test("ClickHouse sync streams usage rows in bounded insert chunks", async () => 
       && query.includes("CODEC(Delta, ZSTD(1))")
       && query.includes("CODEC(Gorilla, ZSTD(1))")
     )));
+    assert.ok(queries.some((query) => (
+      query.includes("CREATE TABLE IF NOT EXISTS telemetry_events")
+      && query.includes("raw_json String CODEC(ZSTD(6))")
+    )));
     const alter = queries.find((query) => query.trim().startsWith("ALTER TABLE usage_events"));
     assert.ok(alter, "long ALTER TABLE SQL should be observed from the request body");
     assert.match(alter, /ADD COLUMN IF NOT EXISTS visible_chars_per_token/);
-    const usageStatsQuery = queries.find((query) => query.includes("FROM usage_events") && query.includes("UNION ALL"));
-    assert.match(usageStatsQuery, /'providerModelEffortDaily' AS bucket/);
-    assert.match(usageStatsQuery, /GROUP BY provider, model, effort, date_key/);
+    const usageStatsQuery = queries.find((query) => query.includes("FROM usage_events") && query.includes("GROUP BY GROUPING SETS"));
+    assert.ok(usageStatsQuery);
+    assert.match(usageStatsQuery, /'providerModelEffortDaily'/);
+    assert.match(usageStatsQuery, /\(provider, model, effort, date_key\)/);
+    assert.equal((usageStatsQuery.match(/FROM usage_events AS raw/g) || []).length, 1);
+    assert.doesNotMatch(usageStatsQuery, /UNION ALL/);
     assert.equal(mock.inserts.usage_events.reduce((sum, insert) => sum + insert.rows, 0), rows);
+    assert.equal(mock.inserts.telemetry_events.reduce((sum, insert) => sum + insert.rows, 0), rows);
+    assert.match(mock.inserts.telemetry_events[0].body, /token_count/);
     assert.ok(mock.inserts.usage_events.length > 1);
     assert.ok(mock.inserts.usage_events.every((insert) => insert.rows <= 100_000));
     assert.ok(mock.inserts.usage_events.every((insert) => insert.bytes <= 70 * 1024));
@@ -541,7 +572,7 @@ test("ClickHouse keeps the whole committed generation visible when a later sourc
       request.query.trim() === "INSERT INTO import_generations FORMAT JSONEachRow"
     ));
     const lastDataInsert = mock.requests.findLastIndex((request) => (
-      /^INSERT INTO (usage_events|output_char_metrics|rate_limit_samples|sessions|sources|codex_session_versions|import_generation_sources) FORMAT JSONEachRow$/.test(request.query.trim())
+      /^INSERT INTO (usage_events|output_char_metrics|rate_limit_samples|telemetry_events|sessions|sources|codex_session_versions|import_generation_sources) FORMAT JSONEachRow$/.test(request.query.trim())
     ));
     assert.ok(markerInsert > lastDataInsert, "the global generation marker must be published last");
 
@@ -612,6 +643,22 @@ test("ClickHouse report pins one committed generation across every query", async
   assert.doesNotMatch(quantileQuery, /quantileTDigestIf/);
   const usageStatsQuery = mock.requests.find((request) => request.query.includes("quarterHourlyProviderModels"))?.query;
   assert.ok(usageStatsQuery);
+  assert.match(usageStatsQuery, /GROUP BY GROUPING SETS/);
+  assert.doesNotMatch(usageStatsQuery, /UNION ALL/);
+  const rateLimitQueries = mock.requests.filter((request) => request.query.includes("repriced_samples AS"));
+  assert.equal(rateLimitQueries.length, 1, "rate-limit windows and attribution should share one window pass");
+  const rateLimitQuery = rateLimitQueries[0]?.query;
+  assert.ok(rateLimitQuery);
+  assert.match(rateLimitQuery, /GROUP BY GROUPING SETS/);
+  assert.match(rateLimitQuery, /\(bucket_type, bucket_key, effort\)/);
+  assert.match(rateLimitQuery, /\(bucket_type, bucket_key, model, effort\)/);
+  assert.match(rateLimitQuery, /AND same_window/);
+  assert.match(rateLimitQuery, /argMaxIf\(plan_type[^\n]+isNotNull\(plan_type\)/);
+  assert.match(rateLimitQuery, /argMaxIf\(used_percent[^\n]+ignored_non_monotonic = 0\)/);
+  assert.match(rateLimitQuery, /maxIf\(timestamp_ms, ignored_non_monotonic = 0\)/);
+  const planHistoryQuery = mock.requests.find((request) => request.query.includes("GROUP BY date_key, agent, limit_id, plan_type"))?.query;
+  assert.ok(planHistoryQuery);
+  assert.doesNotMatch(planHistoryQuery, /any\((agent|limit_id)\)/);
   assert.match(usageStatsQuery, /toStartOfInterval\(parseDateTimeBestEffortOrNull\(timestamp\), INTERVAL 15 MINUTE\)/);
   assert.match(usageStatsQuery, /projectQuarterHourlyProviderModels/);
 });

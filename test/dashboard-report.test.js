@@ -17,6 +17,125 @@ test("dashboard summary keeps daily buckets chronological for time-series charts
   assert.deepEqual(summary.daily.map((row) => row.name), ["2026-01-01", "2026-01-02", "2026-01-03"]);
 });
 
+test("dashboard summary exposes the current local calendar month", () => {
+  const report = newReport();
+  report.monthlyCostLimitUsd = 100;
+  report.monthly["2026-06"] = statsFixture({ costUsd: 12 });
+  report.monthly["2026-07"] = statsFixture({
+    requests: 9,
+    input: 100,
+    cacheRead: 200,
+    output: 30,
+    costUsd: 34.5,
+  });
+
+  const summary = webSummary(report, defaultOptions({ now: new Date(2026, 6, 17, 12, 0, 0) }));
+
+  assert.equal(summary.generatedAt, new Date(2026, 6, 17, 12, 0, 0).toISOString());
+  assert.equal(summary.currentMonth.name, "2026-07");
+  assert.equal(summary.currentMonth.through, "2026-07-17");
+  assert.equal(summary.currentMonth.startAt, new Date(2026, 6, 1).toISOString());
+  assert.equal(summary.currentMonth.endAt, new Date(2026, 6, 18).toISOString());
+  assert.equal(summary.currentMonth.costUsd, 34.5);
+  assert.equal(summary.currentMonth.requests, 9);
+  assert.equal(summary.currentMonth.limitUsd, 100);
+  assert.equal(summary.currentMonth.remainingUsd, 65.5);
+  assert.equal(summary.currentMonth.overageUsd, 0);
+  assert.equal(summary.currentMonth.usedRatio, 0.345);
+});
+
+test("dashboard summary returns a zero current month when it has no usage", () => {
+  const report = newReport();
+
+  const summary = webSummary(report, defaultOptions({ now: new Date(2026, 6, 17, 12, 0, 0) }));
+
+  assert.equal(summary.currentMonth.name, "2026-07");
+  assert.equal(summary.currentMonth.costUsd, 0);
+  assert.equal(summary.currentMonth.limitUsd, null);
+  assert.equal(summary.currentMonth.remainingUsd, null);
+  assert.equal(summary.currentMonth.overageUsd, null);
+  assert.equal(summary.currentMonth.usedRatio, null);
+});
+
+test("dashboard summary reports monthly limit overage without a negative remainder", () => {
+  const report = newReport();
+  report.monthlyCostLimitUsd = 100;
+  report.monthly["2026-07"] = statsFixture({ costUsd: 125 });
+
+  const summary = webSummary(report, defaultOptions({ now: new Date(2026, 6, 17, 12, 0, 0) }));
+
+  assert.equal(summary.currentMonth.remainingUsd, 0);
+  assert.equal(summary.currentMonth.overageUsd, 25);
+  assert.equal(summary.currentMonth.usedRatio, 1.25);
+});
+
+test("subscription summary separates API equivalent from billed spend and exposes observed windows", () => {
+  const report = newReport();
+  report.usageProfile = { id: "home", name: "Home Subscription", mode: "subscription" };
+  report.total = statsFixture({ requests: 10, pricedRequests: 8, costUsd: 12 });
+  report.rateLimits.windows["codex/codex:primary_10080m"] = {
+    agent: "codex",
+    limitId: "codex",
+    kind: "primary",
+    windowMinutes: 10080,
+    planType: "pro",
+    samples: 12,
+    latestUsedPercent: 40,
+    latestRemainingPercent: 60,
+    latestAt: "2026-07-17T12:00:00.000Z",
+    latestResetAt: Date.parse("2026-07-20T12:00:00.000Z") / 1000,
+  };
+  report.rateLimits.planHistory = [
+    { date: "2026-07-17", agent: "codex", limitId: "codex", planType: "pro", samples: 12 },
+  ];
+  report.quarterHourly["2026-07-13T12:00Z"] = statsFixture({ requests: 5, pricedRequests: 4, costUsd: 3 });
+  report.quarterHourly["2026-07-17T11:45Z"] = statsFixture({ requests: 6, pricedRequests: 5, costUsd: 105 });
+  report.quarterHourly["2026-07-17T12:00Z"] = statsFixture({ requests: 1, pricedRequests: 1, costUsd: 999 });
+  report.quarterHourlyProviderModels["2026-07-13T12:00Z"] = {
+    openai: { "gpt-5.6-luna": statsFixture({ requests: 5, pricedRequests: 4, costUsd: 3 }) },
+  };
+  report.quarterHourlyProviderModels["2026-07-17T11:45Z"] = {
+    openai: { "gpt-5.6-sol": statsFixture({ requests: 5, pricedRequests: 4, input: 100, cacheRead: 200, output: 10, costUsd: 5 }) },
+    anthropic: { "claude-opus-4-8": statsFixture({ requests: 1, pricedRequests: 1, input: 1_000, costUsd: 100 }) },
+  };
+  report.quarterHourlyProviderModels["2026-07-17T12:00Z"] = {
+    openai: { "gpt-5.6-future": statsFixture({ requests: 1, pricedRequests: 1, input: 999, costUsd: 999 }) },
+  };
+
+  const summary = webSummary(report, defaultOptions({ now: new Date("2026-07-17T12:00:00.000Z") }));
+
+  assert.deepEqual(summary.usageProfile, report.usageProfile);
+  assert.equal(summary.costSemantics, "api-equivalent");
+  assert.equal(summary.billedCostUsd, null);
+  assert.equal(summary.apiEquivalentCostUsd, 12);
+  assert.equal(summary.currentMonth.limitUsd, null);
+  assert.equal(summary.subscriptionWindows.length, 1);
+  assert.equal(summary.subscriptionWindows[0].windowMinutes, 10080);
+  assert.equal(summary.subscriptionWindows[0].usedPercent, 40);
+  assert.equal(summary.subscriptionWindows[0].apiEquivalentCostUsd, 8);
+  assert.equal(summary.subscriptionWindows[0].pricingCoverage, 0.8);
+  assert.equal(summary.subscriptionWindows[0].provider, "openai");
+  assert.deepEqual(summary.subscriptionWindows[0].localTokens, {
+    input: 100,
+    cacheCreate: 0,
+    cacheRead: 200,
+    output: 10,
+    total: 310,
+  });
+  assert.deepEqual(summary.subscriptionWindows[0].models.map((row) => [row.name, row.costUsd]), [
+    ["openai/gpt-5.6-sol", 5],
+    ["openai/gpt-5.6-luna", 3],
+  ]);
+  assert.equal(summary.subscriptionWindows.some((window) => window.windowMinutes === 300), false);
+  const openaiPlan = summary.subscriptionPlans.find((row) => row.provider === "openai");
+  assert.equal(openaiPlan.currentPlanId, "chatgpt-pro-200");
+  assert.equal(openaiPlan.currentPlanLabel, "ChatGPT Pro ($200)");
+  assert.equal(openaiPlan.source, "protocol");
+  assert.deepEqual(openaiPlan.history.map((row) => row.date), ["2026-07-17"]);
+  const anthropicPlan = summary.subscriptionPlans.find((row) => row.provider === "anthropic");
+  assert.equal(anthropicPlan.source, "none");
+});
+
 test("dashboard serves compact 15-minute timelines separately from the summary", () => {
   const report = newReport();
   report.quarterHourly["2026-01-02T12:00Z"] = statsFixture({ costUsd: 3 });
@@ -156,6 +275,9 @@ test("dashboard html renders Token Flow without a duplicate Cost Mix chart", () 
 
   assert.match(html, /id="daily-token-canvas"/);
   assert.match(html, /id="daily-token-hover-legend"/);
+  assert.match(html, /id="token-value-controls"/);
+  assert.match(html, /data-token-flow-value="tokens"/);
+  assert.match(html, /data-token-flow-value="cost"/);
   assert.doesNotMatch(html, /id="cost-mix-canvas"/);
   assert.doesNotMatch(html, /id="cost-mix-hover-legend"/);
   assert.doesNotMatch(html, /<h2>Cost Mix<\/h2>/);
@@ -209,7 +331,7 @@ test("dashboard html replaces sessions with a zoomable project canvas", () => {
   assert.match(html, /drawSharedSelection/);
   assert.match(html, /bindSharedMixCanvas\(projectChart\)/);
   assert.match(html, /pinnedIndex: null/);
-  assert.match(html, /summaryRow: \{ name: 'Total'/);
+  assert.match(html, /summaryRow:\s*\{\s*name: 'Total'/);
   assert.match(html, /pinOnClick: true/);
   assert.match(html, /row\.name === 'Total'/);
   assert.match(html, /chart\.pinnedIndex =/);
@@ -229,6 +351,7 @@ test("dashboard exposes a database-backed pricing settings editor", () => {
   const html = dashboardHtml();
 
   assert.match(html, /id="pricing-settings"/);
+  assert.match(html, /id="setting-monthly-cost-limit"/);
   assert.match(html, /id="pricing-table"/);
   assert.match(html, /id="save-pricing"/);
   assert.match(html, /\/api\/configuration/);
@@ -236,6 +359,20 @@ test("dashboard exposes a database-backed pricing settings editor", () => {
   assert.match(html, /data-dashboard-mode="settings"/);
   assert.match(html, /body\[data-dashboard-mode="settings"\] #pricing-settings/);
   assert.doesNotMatch(html, /data-section-target="pricing-settings"/);
+});
+
+test("dashboard exposes typed API and subscription usage profile controls", () => {
+  const html = dashboardHtml();
+
+  assert.match(html, /id="setting-usage-profile-mode"/);
+  assert.match(html, /id="setting-usage-profile-name"/);
+  assert.match(html, /id="subscription-limits"/);
+  assert.match(html, /id="subscription-plan-grid"/);
+  assert.match(html, /summary\.costSemantics === 'api-equivalent'/);
+  assert.match(html, /renderSubscriptionWindows\(summary\)/);
+  assert.match(html, /renderSubscriptionPlans\(summary\)/);
+  assert.doesNotMatch(html, /\bformatUsd\(/);
+  assert.match(html, /await loadSummary\(\)/);
 });
 
 test("dashboard html exposes per-chart relative and absolute date filters with adaptive resolution", () => {
@@ -276,6 +413,11 @@ test("dashboard html exposes per-chart relative and absolute date filters with a
   assert.match(html, /Wheel: zoom at pointer/);
   assert.doesNotMatch(html, /token-resolution-controls/);
   assert.doesNotMatch(html, /project-resolution-controls/);
+  assert.match(html, /id="token-relative-range"[\s\S]*option value="month">MTD/);
+  assert.match(html, /id="project-relative-range"[\s\S]*option value="month">MTD/);
+  assert.match(html, /id="model-relative-range"[\s\S]*option value="month">MTD/);
+  assert.match(html, /config\.summaryRow \|\| row/);
+  assert.match(html, /visibleDomainLabel\(chart\.domain, resolution, Boolean\(config\.localCalendarRange\)\)/);
   assert.doesNotMatch(html, /data-mix-mode=/);
   assert.match(html, /TokenomicsTimeline\.chooseAdaptiveResolution/);
   assert.match(html, /TokenomicsTimeline\.zoomDomain/);
@@ -298,8 +440,24 @@ test("Daily Token Flow value text includes total tokens and total USD cost", () 
   const html = dashboardHtml();
   const chartSource = html.slice(html.indexOf("function renderDailyTokenChart"), html.indexOf("function bindSharedMixCanvas"));
 
+  assert.match(chartSource, /tokenFlowValueMode === 'cost'/);
+  assert.match(chartSource, /key: 'token-' \+ globalTimelineKey\(\)/);
+  assert.doesNotMatch(chartSource, /key:[^\n]*tokenFlowValueMode/);
+  assert.match(chartSource, /mix: costMode \? costMix : tokenMix/);
+  assert.match(chartSource, /scale: costMode \? moneyScale : tokenScale/);
   assert.match(chartSource, /valueText: row =>[\s\S]*formatTokenCount\(totalTokens\(row\)\)/);
   assert.match(chartSource, /valueText: row =>[\s\S]*formatUsdCompact\(row\.costUsd \|\| 0\)/);
+});
+
+test("Cost KPI distinguishes API spend from subscription API equivalent", () => {
+  const html = dashboardHtml();
+
+  assert.match(html, /costLabel = subscription \? 'API Equivalent' : 'API Cost'/);
+  assert.match(html, /summary\.apiEquivalentCostUsd/);
+  assert.match(html, /currentMonthCostMeta\(summary\.currentMonth\)/);
+  assert.match(html, /month\.remainingUsd[\s\S]*left/);
+  assert.match(html, /month\.overageUsd[\s\S]*over/);
+  assert.match(html, /\^\\d\{4\}-\\d\{2\}\$[\s\S]*month: 'short'[\s\S]*timeZone: 'UTC'/);
 });
 
 test("dashboard html exposes the operational overview layout", () => {
