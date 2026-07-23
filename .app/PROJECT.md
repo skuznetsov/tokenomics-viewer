@@ -15,35 +15,23 @@ FULL path: REQUEST → GRILL → [RESEARCH] → SPEC → DEVELOP ⇄ VALIDATE �
 | REQUEST | ✅ done |
 | GRILL | ✅ done — REQ.md |
 | RESEARCH | ✅ done — RESEARCH.md + integration map |
-| SPEC | in_progress |
-| DEVELOP | pending |
+| SPEC | ✅ done — SPEC.md |
+| DEVELOP | in_progress (LeadDev impl) ‖ DrPe pricing (OI-S1) |
 | VALIDATE | pending |
 | DONE | pending |
 
-## Resolved Decisions (GRILL)
-| # | Decision |
-|---|----------|
-| D1 | omp emits its OWN consolidated per-session usage log (single source of truth); NOT aggregation of underlying agents. |
-| D2 | omp is a NEW top-level platform, peer to "Claude Code"/"Codex". |
-| D3 | Full feature parity: ingest→parse→store→visualize→price. |
-| D4 | Flat per-session totals; no subagent-tree breakdown. |
-| D5 | omp has its OWN pricing config; cost computed from it. |
-| D6 | omp log format/path researched by DrPe (OI-1 resolved). |
+## Resolved Decisions (GRILL): D1 omp's own log · D2 top-level peer · D3 full parity · D4 flat per-session · D5 omp's own pricing config · D6 format researched.
 
-## Resolved Architectural Decisions (RESEARCH → SPEC)
-| # | Decision |
-|---|----------|
-| A1 (OQ-1) | omp source = JSONL session transcripts at `~/.omp/agent/sessions/<project-slug>/<ISO-ts>_<uuid>.jsonl`; usage block per assistant message. Relocatable via `PI_CODING_AGENT_DIR`/`PI_CONFIG_DIR`. |
-| A2 (OQ-2) | No schema migration. `provider="omp"` IS the platform discriminator; omp surfaces in existing provider/model breakdowns. FR-4 satisfied via provider queryability. |
-| A3 (OQ-3) | New provider string `"omp"`. Parser MUST pin provider explicitly (mirror Codex), defeating `inferProvider` so omp's `claude-*`/`gpt-*` model refs are never mispriced as anthropic/openai. |
-| A4 (OQ-4) | Rate-limit/quota + subscription-plan detection for omp are OUT OF SCOPE (D4/NG-2/NG-3). |
-| A5 (cost) | Re-derive cost from the viewer's omp pricing config (D5); omp's precomputed log cost is often zero/unreliable. |
-| A6 (subagents) | Ingest includes omp's OWN subagent sidecar `.jsonl` (part of omp's own logs, not the Claude/Codex integrations). v1: process all session-tree jsonl files; no parent-only toggle (YAGNI). |
+## Resolved Architectural Decisions (SPEC): A1 JSONL sessions source · A2 provider="omp" discriminator, no schema migration · A3 provider pinned in parser · A4 rate-limit/subscription out of scope · A5 re-derive cost via calculateCost · A6 ingest all session-tree jsonl (parent + omp subagent sidecars).
+
+## Open Items
+- **OI-S1 (resolve via DrPe during DEVELOP):** PRICING.omp values + PRICING_SOURCES.omp URL are PLACEHOLDER — fill from official GLM/Zhipu AI price list.
+- **OI-S2:** cacheWrite→cacheCreate5m mapping assumption (cacheWrite empirically 0 in inspected records).
+- **OI-S3:** parent-only toggle deferred (YAGNI).
 
 ## Artifacts
-- `.app/REQ.md` — Requirements (ReqGuru)
-- `.app/RESEARCH.md` — omp log format & location (DrPe)
-- Integration Map — `agent://LeadDevPatternMap` (LeadDev)
+- `.app/REQ.md` · `.app/RESEARCH.md` · `.app/SPEC.md`
+- Integration Map — `agent://LeadDevPatternMap`
 
 ## Pending Asks
 (none)
