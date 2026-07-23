@@ -206,8 +206,10 @@ test("omp malformed JSON is counted in lenient mode and rejected in strict mode"
     JSON.stringify({ type: "session", version: 3, id: "s1", timestamp: "2026-07-23T00:40:00.000Z", cwd: "/tmp/project-omp", title: "t" }),
     JSON.stringify({
       type: "message", id: "m1", timestamp: "2026-07-23T00:42:17.380Z",
-      message: { role: "assistant", content: [] }, provider: "zai", model: "glm-5.2",
-      usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 110, cost: { total: 0 } },
+      message: {
+        role: "assistant", model: "glm-5.2", provider: "zai", content: [],
+        usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 110, cost: { total: 0 } },
+      },
       timestamp: 1784767330214,
     }),
     "{malformed-json",
@@ -237,8 +239,10 @@ test("omp discovery ingests parent transcripts and subagent sidecars (A6)", asyn
   const header = (cwd) => JSON.stringify({ type: "session", version: 3, id: cwd.slice(-4), timestamp: "2026-07-23T00:40:00.000Z", cwd, title: "t" });
   const assistant = () => JSON.stringify({
     type: "message", id: "m", timestamp: "2026-07-23T00:42:17.380Z",
-    message: { role: "assistant", content: [] }, provider: "zai", model: "glm-5.2",
-    usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 110, cost: { total: 0 } },
+    message: {
+      role: "assistant", model: "glm-5.2", provider: "zai", content: [],
+      usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 110, cost: { total: 0 } },
+    },
     timestamp: 1784767330214,
   });
 
@@ -252,4 +256,32 @@ test("omp discovery ingests parent transcripts and subagent sidecars (A6)", asyn
   assert.ok(report.providerModels["omp/glm-5.2"]);
   assert.equal(report.projects["/tmp/project-omp"].requests, 1);
   assert.equal(report.projects["/tmp/sidecar-project"].requests, 1);
+});
+
+test("omp assistant message.usage is aggregated into report totals", async () => {
+  const tmp = fs.mkdtempSync(Path.join(os.tmpdir(), "tokenomics-omp-usage-test-"));
+  const ompHome = Path.join(tmp, "omp-home");
+  const sessions = Path.join(ompHome, "sessions", "-tmp-project-omp");
+  fs.mkdirSync(sessions, { recursive: true });
+  // Real omp shape: model/provider/usage live NESTED in json.message, never top-level.
+  fs.writeFileSync(Path.join(sessions, "session.jsonl"), [
+    JSON.stringify({ type: "session", version: 3, id: "s1", timestamp: "2026-07-23T00:40:00.000Z", cwd: "/tmp/project-omp", title: "t" }),
+    JSON.stringify({
+      type: "message", id: "m1", timestamp: "2026-07-23T00:42:17.380Z",
+      message: {
+        role: "assistant", model: "glm-5.2", provider: "zai", content: [],
+        usage: { input: 737, output: 419, cacheRead: 40064, cacheWrite: 0, totalTokens: 41220, cost: { total: 0 } },
+      },
+      timestamp: 1784767330214,
+    }),
+    "",
+  ].join("\n"));
+
+  const report = await buildReport(defaultOptions({ source: "omp", home: tmp, ompHome }));
+  assert.equal(report.total.requests, 1);
+  assert.equal(report.total.input, 737);
+  assert.equal(report.total.output, 419);
+  assert.equal(report.total.cacheRead, 40064);
+  assert.equal(report.providers["omp"].requests, 1);
+  assert.ok(report.providerModels["omp/glm-5.2"]);
 });

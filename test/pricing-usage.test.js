@@ -1064,13 +1064,14 @@ test("omp parser pins provider and derives cost from omp pricing (duplicate-time
   processLine(JSON.stringify({
     type: "message", id: "4f9506d3", parentId: "7d542783",
     timestamp: "2026-07-23T00:42:17.380Z",
-    message: { role: "assistant", content: [] },
-    api: "anthropic-messages", provider: "zai", model: "glm-5.2",
-    usage: {
-      input: 994, output: 57, cacheRead: 39232, cacheWrite: 0, totalTokens: 40283,
-      cost: { input: 0.0013916, output: 0.0002508, cacheRead: 0.01020032, cacheWrite: 0, total: 0.01184272 },
+    message: {
+      role: "assistant", provider: "zai", model: "glm-5.2", content: [],
+      usage: {
+        input: 994, output: 57, cacheRead: 39232, cacheWrite: 0, totalTokens: 40283,
+        cost: { input: 0.0013916, output: 0.0002508, cacheRead: 0.01020032, cacheWrite: 0, total: 0.01184272 },
+      },
     },
-    stopReason: "toolUse", timestamp: 1784767330214, responseId: "msg_x",
+    api: "anthropic-messages", stopReason: "toolUse", timestamp: 1784767330214, responseId: "msg_x",
   }), 2);
 
   assert.equal(report.total.requests, 1);
@@ -1104,9 +1105,11 @@ test("omp cost is re-derived from viewer pricing, not trusted from omp usage.cos
   // pricing config — proving usage.cost is ignored (A5).
   processLine(JSON.stringify({
     type: "message", id: "m-cost", timestamp: "2026-07-23T00:42:17.380Z",
-    message: { role: "assistant", content: [] }, provider: "zai", model: "glm-5.2",
-    usage: { input: 1_000_000, output: 500_000, cacheRead: 0, cacheWrite: 0, totalTokens: 1_500_000,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    message: {
+      role: "assistant", provider: "zai", model: "glm-5.2", content: [],
+      usage: { input: 1_000_000, output: 500_000, cacheRead: 0, cacheWrite: 0, totalTokens: 1_500_000,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    },
     stopReason: "stop", timestamp: 1784767330214,
   }), 2);
 
